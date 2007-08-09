@@ -53,6 +53,8 @@ class Job(Cobalt.Data.Data):
             self.set('jobid', str(jobid))
         else:
             self.set('jobid', data.get('jobid'))
+        if not self.get('jobname', False):
+            self.set('jobname', 'N/A')
         if not self.get('state', False):
             self.set('state', 'queued')
         if not self.get('attribute', False):
@@ -127,18 +129,21 @@ class Job(Cobalt.Data.Data):
             return self.timers['queue'].start # job has always been eligible to run
     etime = property(_get_etime)
     
-    def log_start (self):
-        walltime_minutes = str(int(self.get("time")) % 60)
-        walltime_hours = str(int(self.get("time")) // 60)
-        if len(walltime_minutes) = 1:
-            walltime_minutes = "0" + walltime_minutes
-        if len(walltime_hours) = 1:
-            walltime_hours = "0" + walltime_hours
+    def LogStart (self):
+        def len2 (input):
+            input = str(input)
+            if len(input) == 1:
+                return "0" + input
+            else:
+                return input
+        
+        walltime_minutes = len2(int(self.get("time")) % 60)
+        walltime_hours = len2(int(self.get("time")) // 60)
         
         self.pbslog.log("S",
             user = self.get("user"), # the user name under which the job will execute
             #group = , # the group name under which the job will execute
-            #jobname = , # the name of the job
+            jobname = self.get("jobname"), # the name of the job
             queue = self.get("queue"), # the name of the queue in which the job resides
             ctime = int(self.timers['queue'].start), # time in seconds when job was created (first submitted)
             qtime = int(self.timers['current_queue'].start), # time in seconds when job was queued into current queue
@@ -146,14 +151,18 @@ class Job(Cobalt.Data.Data):
             start = int(self.timers['user'].start), # time in seconds when job execution started
             exec_host = self.get("location"), # name of host on which the job is being executed (location is a :-separated list of nodes)
             #Resource_List__dot__RES = , # limit for use of RES
-            #Resource_List__dot__ncpus = , # 24
-            Resource_List__dot__nodect = self.get("nodecount"),
+            Resource_List__dot__ncpus = self.get("proccount"), # max number of cpus
+            Resource_List__dot__nodect = self.get("nodecount"), # max number of nodes
             #Resource_List__dot__nodes = , # 6:ppn=4
             #Resource_List__dot__place = , # scatter
             #Resource_List__dot__select = , # 6:ncpus=4
             Resource_List__dot__walltime = "%s:%s:00" % (walltime_hours, walltime_minutes),
             #session = , # session number of job
             #accountint_id = , # identifier associated with system-generated accounting data
+            mode = self.get("mode"),
+            cwd = self.get("cwd"),
+            exe = self.get("command"),
+            args = self.get("args"),
         )
 
     def fail_job(self, state):
@@ -401,7 +410,7 @@ class Job(Cobalt.Data.Data):
         '''Run the user job'''
         self.set('state', 'running')
         self.timers['user'].Start()
-        self.log_start()
+        self.LogStart()
         args = []
         if self.get("host", False):
             args = ["-i", "-h", self.get('host'), "-p", self.get('port')]
@@ -571,6 +580,58 @@ class Job(Cobalt.Data.Data):
                                 (self.get('jobid'), self.get('user'),
                                  self.get('nodes'), self.GetStats()))
         
+        def len2 (input):
+            input = str(input)
+            if len(input) == 1:
+                return "0" + input
+            else:
+                return input
+        
+        req_walltime_minutes = len2(int(self.get("time")) % 60)
+        req_walltime_hours = len2(int(self.get("time")) // 60)
+        
+        runtime = int(self.timers['user'].Check())
+        walltime_seconds = len2(runtime % (60))
+        walltime_minutes = len2(runtime % (60 * 60) // 60)
+        walltime_hours = len2(runtime // (60 * 60))
+        
+        optional_pbs_data = dict()
+        try:
+            optional_pbs_data['account'] = self.get("project") # if job has an "account name" string
+        except KeyError:
+            pass
+        
+        self.pbslog.log("E",
+            user = self.get("user"), # the user name under which the job executed
+            #group = , # the group name under which the job executed
+            #account = , # if job has an "account name" string
+            jobname = self.get("jobname"), # the name of the job
+            queue = self.get("queue"), # the name of the queue in which the job executed
+            #resvname = , # the name of the resource reservation, if applicable
+            #resvID = , # the id of the resource reservation, if applicable
+            ctime = int(self.timers['queue'].start), # time in seconds when job was created (first submitted)
+            qtime = int(self.timers['current_queue'].start), # time in seconds when job was queued into current queue
+            etime = self.etime, # time in seconds when job became eligible to run
+            start = int(self.timers['user'].start), # time in seconds when job execution started
+            exec_host = self.get("location"), # name of host on which the job is being executed
+            #Resource_List__dot__RES = , # limit for use of RES
+            Resource_List__dot__ncpus = self.get("proccount"), # max number of cpus
+            Resource_List__dot__nodect = self.get("nodecount"), # max number of nodes
+            Resource_List__dot__walltime = "%s:%s:00" % (req_walltime_hours, req_walltime_minutes),
+            #session = , # session number of job
+            #alt_id = , # optional alternate job identifier
+            end = self.timers['user'].stop, # time in seconds when job ended execution
+            #Exit_status = , # the exit status of the top process of the job
+            #resources_used__dot__RES = , # total RES used for job
+            resources_used__dot__walltime = "%s:%s:%s" % (walltime_hours, walltime_minutes, walltime_seconds),
+            #accounting_id = , # CSA JID job id
+            mode = self.get("mode"),
+            cwd = self.get("cwd"),
+            exe = self.get("command"),
+            args = self.get("args"),
+            **optional_pbs_data
+        )
+        
         #AddEvent("queue-manager", "job-done", self.get('jobid'))
 
 class BGJob(Job):
@@ -671,7 +732,7 @@ class BGJob(Job):
         '''Run a Blue Gene Job'''
         self.set('state', 'running')
         self.timers['user'].Start()
-        self.log_start()
+        self.LogStart()
         if not self.get('outputpath', False):
             self.set('outputpath', "%s/%s.output" % (self.get('outputdir'), self.get('jobid')))
         if not self.get('errorpath', False):
@@ -1195,33 +1256,6 @@ class CQM(Cobalt.Component.Component):
         finished_jobs = (j for j in (j for queue in self.Queues for j in queue) if j.get('state') == 'done')
         for job in finished_jobs:
             job.LogFinish()
-            optional_pbs_data = dict()
-            try:
-                optional_pbs_data['account'] = job.get("project") # if job has an "account name" string
-            except KeyError:
-                pass
-            job.pbslog.log("E",
-                user = job.get("user"), # the user name under which the job executed
-                #group = , # the group name under which the job executed
-                #account = , # if job has an "account name" string
-                #jobname = , # the name of the job
-                queue = job.get("queue"), # the name of the queue in which the job executed
-                #resvname = , # the name of the resource reservation, if applicable
-                #resvID = , # the id of the resource reservation, if applicable
-                ctime = int(job.timers['queue'].start), # time in seconds when job was created (first submitted)
-                qtime = int(job.timers['current_queue'].start), # time in seconds when job was queued into current queue
-                etime = self.etime, # time in seconds when job became eligible to run
-                start = int(job.timers['user'].start), # time in seconds when job execution started
-                exec_host = job.get("location"), # name of host on which the job is being executed
-                #Resource_List__dot__RES = , # limit for use of RES
-                #session = , # session number of job
-                #alt_id = , # optional alternate job identifier
-                end = job.timers['user'].stop, # time in seconds when job ended execution
-                #Exit_status = , # the exit status of the top process of the job
-                #resources_used__dot__RES = , # total RES used for job
-                #accounting_id = , # CSA JID job id
-                **optional_pbs_data
-            )
         [queue.remove(j) for (j, queue) in [(j, queue) for queue in self.Queues for j in queue] if j.get('state') == 'done']
         [self.Queues.remove(q) for q in self.Queues.data[:]
          if q.get('state') == 'dead' and q.get('name').startswith('R.')

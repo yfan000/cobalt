@@ -472,15 +472,15 @@ class BGSched(Cobalt.Component.Component):
         self.register_function(self.ReleaseReservation, "DelReservation")
         self.register_function(self.SetReservation, "SetReservation")
     
-    def load_state (self):
+    def load_state (self, *args, **kwargs):
         """Support legacy state data."""
         try:
-            super(CQM, self).load_state()
+            Cobalt.Component.Component.load_state(self, *args, **kwargs)
         except:
             self.logger.info("Statefile load failed %s" % sys.exc_info()[1])
             self.logger.info("falling back to legacy statefile format...")
             self.__statefields__ = self.__legacy_statefields__ # this is in the instance scope
-            super(CQM, self).load_state()
+            Cobalt.Component.Component.load_state(self, *args, **kwargs)
             del self.__statefields__ # remove instance variable; class variable reactivated
 
     def GetReservations(self):
