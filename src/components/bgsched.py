@@ -476,7 +476,7 @@ class BGSched(Cobalt.Component.Component):
         """Support legacy state data."""
         try:
             Cobalt.Component.Component.load_state(self, *args, **kwargs)
-        except:
+        except (IndexError, AttributeError):
             self.logger.info("Statefile load failed %s" % sys.exc_info()[1])
             self.logger.info("falling back to legacy statefile format...")
             self.__statefields__ = self.__legacy_statefields__ # this is in the instance scope
