@@ -110,6 +110,35 @@ class Job(Cobalt.Data.Data):
         #self.acctlog = Cobalt.Util.AccountingLog('qm')
         self.comms = Cobalt.Proxy.CommDict()
         self.pbslog = Cobalt.Util.PBSLog(self.get('jobid'))
+    
+    def log_start (self):
+        walltime_minutes = str(int(self.get("time")) % 60)
+        walltime_hours = str(int(self.get("time")) // 60)
+        if len(walltime_minutes) = 1:
+            walltime_minutes = "0" + walltime_minutes
+        if len(walltime_hours) = 1:
+            walltime_hours = "0" + walltime_hours
+        
+        self.pbslog.log("S",
+            user = self.get("user"), # the user name under which the job will execute
+            #group = , # the group name under which the job will execute
+            #jobname = , # the name of the job
+            queue = self.get("queue"), # the name of the queue in which the job resides
+            ctime = int(self.timers['queue'].start), # time in seconds when job was created (first submitted)
+            qtime = int(self.timers['current_queue'].start), # time in seconds when job was queued into current queue
+            #etime = , # time in seconds when job became eligible to run; no holds, etc.
+            start = int(self.timers['user'].start), # time in seconds when job execution started
+            exec_host = self.get("location"), # name of host on which the job is being executed (location is a :-separated list of nodes)
+            #Resource_List__dot__RES = , # limit for use of RES
+            #Resource_List__dot__ncpus = , # 24
+            Resource_List__dot__nodect = self.get("nodecount"),
+            #Resource_List__dot__nodes = , # 6:ppn=4
+            #Resource_List__dot__place = , # scatter
+            #Resource_List__dot__select = , # 6:ncpus=4
+            Resource_List__dot__walltime = "%s:%s:00" % (walltime_hours, walltime_minutes),
+            #session = , # session number of job
+            #accountint_id = , # identifier associated with system-generated accounting data
+        )
 
     def fail_job(self, state):
         '''Signal complete job failure, resulting in specified state'''
@@ -356,20 +385,7 @@ class Job(Cobalt.Data.Data):
         '''Run the user job'''
         self.set('state', 'running')
         self.timers['user'].Start()
-        self.pbslog.log("S",
-            user = self.get("user"), # the user name under which the job will execute
-            #group = , # the group name under which the job will execute
-            #jobname = , # the name of the job
-            queue = self.get("queue"), # the name of the queue in which the job resides
-            ctime = int(self.timers['queue'].start), # time in seconds when job was created (first submitted)
-            qtime = int(self.timers['current_queue'].start), # time in seconds when job was queued into current queue
-            #etime = , # time in seconds when job became eligible to run; no holds, etc.
-            start = int(self.timers['user'].start), # time in seconds when job execution started
-            exec_host = self.get("location"), # name of host on which the job is being executed
-            #Resource_List__dot__RES = , # limit for use of RES
-            #session = , # session number of jobs
-            #accountint_id = , # identifier associated with system-generated accounting data
-        )
+        self.log_start()
         args = []
         if self.get("host", False):
             args = ["-i", "-h", self.get('host'), "-p", self.get('port')]
@@ -639,20 +655,7 @@ class BGJob(Job):
         '''Run a Blue Gene Job'''
         self.set('state', 'running')
         self.timers['user'].Start()
-        self.pbslog.log("S",
-            user = self.get("user"), # the user name under which the job will execute
-            #group = , # the group name under which the job will execute
-            #jobname = , # the name of the job
-            queue = self.get("queue"), # the name of the queue in which the job resides
-            ctime = int(self.timers['queue'].start), # time in seconds when job was created (first submitted)
-            qtime = int(self.timers['current_queue'].start), # time in seconds when job was queued into current queue
-            #etime = , # time in seconds when job became eligible to run; no holds, etc.
-            start = int(self.timers['user'].start), # time in seconds when job execution started
-            exec_host = self.get("location"), # name of host on which the job is being executed
-            #Resource_List__dot__RES = , # limit for use of RES
-            #session = , # session number of jobs
-            #accountint_id = , # identifier associated with system-generated accounting data
-        )
+        self.log_start()
         if not self.get('outputpath', False):
             self.set('outputpath', "%s/%s.output" % (self.get('outputdir'), self.get('jobid')))
         if not self.get('errorpath', False):
