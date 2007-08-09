@@ -95,7 +95,16 @@ class Job(Cobalt.Data.Data):
                     (self.get('jobid'), self.get('user'), self.get('queue')))
         self.acctlog.LogMessage('Q;%s;%s;%s' % \
                                 (self.get('jobid'), self.get('user'), self.get('queue')))
-
+    
+    def set (self, key, value, *args, **kwargs):
+        if key == "state":
+            if value == "hold":
+                self.timers['hold'] = Timer()
+                self.timers['hold'].Start()
+            elif self.get("state") == "hold":
+                self.timers['hold'].Stop()
+        return super(Job, self).set(key, value, *args, **kwargs)
+    
     def __getstate__(self):
         data = {}
         for key, value in self.__dict__.iteritems():
@@ -110,6 +119,13 @@ class Job(Cobalt.Data.Data):
         #self.acctlog = Cobalt.Util.AccountingLog('qm')
         self.comms = Cobalt.Proxy.CommDict()
         self.pbslog = Cobalt.Util.PBSLog(self.get('jobid'))
+    
+    def _get_etime (self):
+        try:
+            return self.timers['hold'].stop # job became eligible at end of last hold
+        except KeyError:
+            return self.timers['queue'].start # job has always been eligible to run
+    etime = property(_get_etime)
     
     def log_start (self):
         walltime_minutes = str(int(self.get("time")) % 60)
@@ -126,7 +142,7 @@ class Job(Cobalt.Data.Data):
             queue = self.get("queue"), # the name of the queue in which the job resides
             ctime = int(self.timers['queue'].start), # time in seconds when job was created (first submitted)
             qtime = int(self.timers['current_queue'].start), # time in seconds when job was queued into current queue
-            #etime = , # time in seconds when job became eligible to run; no holds, etc.
+            etime = self.etime, # time in seconds when job became eligible to run; no holds, etc.
             start = int(self.timers['user'].start), # time in seconds when job execution started
             exec_host = self.get("location"), # name of host on which the job is being executed (location is a :-separated list of nodes)
             #Resource_List__dot__RES = , # limit for use of RES
@@ -1194,7 +1210,7 @@ class CQM(Cobalt.Component.Component):
                 #resvID = , # the id of the resource reservation, if applicable
                 ctime = int(job.timers['queue'].start), # time in seconds when job was created (first submitted)
                 qtime = int(job.timers['current_queue'].start), # time in seconds when job was queued into current queue
-                #etime = , # time in seconds when job became eligible to run
+                etime = self.etime, # time in seconds when job became eligible to run
                 start = int(job.timers['user'].start), # time in seconds when job execution started
                 exec_host = job.get("location"), # name of host on which the job is being executed
                 #Resource_List__dot__RES = , # limit for use of RES
