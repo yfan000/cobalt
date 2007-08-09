@@ -84,9 +84,9 @@ if __name__ == '__main__':
         user = getpass.getuser()
         for cmd in kdata:
             if cmd == '--delete':
-                response = cqm.DelJobs(spec, user=user, force=True)
+                response = cqm.DelJobs(spec, user, True)
             else:
-                response = cqm.DelJobs(spec, user=user)
+                response = cqm.DelJobs(spec, user)
     elif opts['run']:
         location = opts['run']
         response = cqm.RunJobs(spec, location.split(':'))

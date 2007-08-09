@@ -103,7 +103,7 @@ class Job(Cobalt.Data.Data):
             if value == "hold":
                 self.timers['hold'] = Timer()
                 self.timers['hold'].Start()
-            elif self.get("state") == "hold":
+            elif self.get("state", "") == "hold":
                 self.timers['hold'].Stop()
         return super(Job, self).set(key, value, *args, **kwargs)
     
@@ -137,8 +137,8 @@ class Job(Cobalt.Data.Data):
             else:
                 return input
         
-        walltime_minutes = len2(int(self.get("time")) % 60)
-        walltime_hours = len2(int(self.get("time")) // 60)
+        walltime_minutes = len2(int(self.get("walltime")) % 60)
+        walltime_hours = len2(int(self.get("walltime")) // 60)
         
         self.pbslog.log("S",
             user = self.get("user"), # the user name under which the job will execute
@@ -151,8 +151,8 @@ class Job(Cobalt.Data.Data):
             start = int(self.timers['user'].start), # time in seconds when job execution started
             exec_host = self.get("location"), # name of host on which the job is being executed (location is a :-separated list of nodes)
             #Resource_List__dot__RES = , # limit for use of RES
-            Resource_List__dot__ncpus = self.get("proccount"), # max number of cpus
-            Resource_List__dot__nodect = self.get("nodecount"), # max number of nodes
+            Resource_List__dot__ncpus = self.get("procs"), # max number of cpus
+            Resource_List__dot__nodect = self.get("nodes"), # max number of nodes
             #Resource_List__dot__nodes = , # 6:ppn=4
             #Resource_List__dot__place = , # scatter
             #Resource_List__dot__select = , # 6:ncpus=4
@@ -162,7 +162,7 @@ class Job(Cobalt.Data.Data):
             mode = self.get("mode"),
             cwd = self.get("cwd"),
             exe = self.get("command"),
-            args = self.get("args"),
+            args = self.get("args").join(":"),
         )
 
     def fail_job(self, state):
@@ -579,7 +579,9 @@ class Job(Cobalt.Data.Data):
         self.acctlog.LogMessage("Job %s/%s on %s nodes done. %s exit code %s" % \
                                 (self.get('jobid'), self.get('user'),
                                  self.get('nodes'), self.GetStats()))
+        self.LogFinishPBS()
         
+    def LogFinishPBS (self):
         def len2 (input):
             input = str(input)
             if len(input) == 1:
@@ -587,8 +589,8 @@ class Job(Cobalt.Data.Data):
             else:
                 return input
         
-        req_walltime_minutes = len2(int(self.get("time")) % 60)
-        req_walltime_hours = len2(int(self.get("time")) // 60)
+        req_walltime_minutes = len2(int(self.get("walltime")) % 60)
+        req_walltime_hours = len2(int(self.get("walltime")) // 60)
         
         runtime = int(self.timers['user'].Check())
         walltime_seconds = len2(runtime % (60))
@@ -615,8 +617,8 @@ class Job(Cobalt.Data.Data):
             start = int(self.timers['user'].start), # time in seconds when job execution started
             exec_host = self.get("location"), # name of host on which the job is being executed
             #Resource_List__dot__RES = , # limit for use of RES
-            Resource_List__dot__ncpus = self.get("proccount"), # max number of cpus
-            Resource_List__dot__nodect = self.get("nodecount"), # max number of nodes
+            Resource_List__dot__ncpus = self.get("procs"), # max number of cpus
+            Resource_List__dot__nodect = self.get("nodes"), # max number of nodes
             Resource_List__dot__walltime = "%s:%s:00" % (req_walltime_hours, req_walltime_minutes),
             #session = , # session number of job
             #alt_id = , # optional alternate job identifier
@@ -628,7 +630,7 @@ class Job(Cobalt.Data.Data):
             mode = self.get("mode"),
             cwd = self.get("cwd"),
             exe = self.get("command"),
-            args = self.get("args"),
+            args = self.get("args").join(":"),
             **optional_pbs_data
         )
         
@@ -771,6 +773,8 @@ class BGJob(Job):
                                 (self.get('jobid'), self.get('user'),
                                  self.get('nodes'), self.GetStats(),
                                  str(exitstatus)))
+        self.LogFinishPBS()
+    
     def Finish(self):
         '''Finish up accounting for job, also adds postscript ability'''
         Job.Finish(self)
