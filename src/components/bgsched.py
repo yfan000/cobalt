@@ -3,6 +3,7 @@
 '''Super-Simple Scheduler for BG/L'''
 __revision__ = '$Revision$'
 
+from datetime import datetime
 import copy, logging, sys, time, xmlrpclib, ConfigParser
 import Cobalt.Component, Cobalt.Data, Cobalt.Logging, Cobalt.Proxy, Cobalt.Util
 
@@ -500,11 +501,11 @@ class BGSched(Cobalt.Component.Component):
         current_time = time.time()
         for reservation in self.GetReservations():
             name, user, start, duration = reservation
-            if start <= current_time and ((rname, start) not in self.log_state['reservation_begun'].keys() or not self.log_state['reservation_begun'][(rname, start)]):
-                self.log_state['reservation_begun'][(rname, start)] = True
-                self.pbslog.log("B", rname, datetime=datetime.fromtimestamp(start),
-                    owner = ruser, # name of party who submitted the resource reservation request
-                    name = rname, # optional reservation name
+            if start <= current_time and ((name, start) not in self.log_state['reservation_begun'].keys() or not self.log_state['reservation_begun'][(name, start)]):
+                self.log_state['reservation_begun'][(name, start)] = True
+                self.pbslog.log("B", name, datetime=datetime.fromtimestamp(start),
+                    owner = user or "N/A", # name of party who submitted the resource reservation request
+                    name = name, # optional reservation name
                     #account = , # optional accounting string
                     #queue = , # name of the instantiated reservation queue or the name of the queue of the reservation-job
                     #ctime = , # time at which the resource reservation was created
@@ -530,14 +531,14 @@ class BGSched(Cobalt.Component.Component):
                     datetime = datetime.now()
                     ap['reservations'].remove(res)
                     self.pbslog.log("K", res[0], datetime=datetime,
-                        requester = user, # who deleted the resource reservation
+                        requester = user or "N/A", # who deleted the resource reservation
                     )
                     self.pbslog.log("U", name, datetime=datetime,
-                        requester = user, # who requested the resources reservation
+                        requester = user or "N/A", # who requested the resources reservation
                     )
                     ap['reservations'].append((name, user, start, duration))
                     self.pbslog.log("Y", name, datetime=datetime,
-                        requester = user, # who requested the resource reservation
+                        requester = user or "N/A", # who requested the resource reservation
                     )
                     resv_updates.append((name, user, start, duration))
         #now update queues
@@ -587,14 +588,14 @@ class BGSched(Cobalt.Component.Component):
     def AddReservation(self, _, spec, name, user, start, duration):
         '''Add a reservation to matching partitions'''
         self.pbslog.log("U", name,
-            requester = user, # who requested the resources reservation
+            requester = user or "N/A", # who requested the resources reservation
         )
         reservation = (name, user, start, duration)
         data = self.partitions.Get(spec, callback=lambda x,
                                    y:x.get('reservations').append(reservation))
         self.ResQueueSync()
         self.pbslog.log("Y", name,
-            requester = user, # who requested the resources reservation
+            requester = user or "N/A", # who requested the resources reservation
         )
         return data
     
@@ -606,7 +607,7 @@ class BGSched(Cobalt.Component.Component):
                 if rsv[0] == name:
                     reservations.remove(rsv)
                     self.pbslog.log("k", name,
-                        requester = user or rsv[1],
+                        requester = user or rsv[1] or "N/A",
                     )
         data = self.partitions.Get(spec, cb)
         self.ResQueueSync()
@@ -621,9 +622,6 @@ class BGSched(Cobalt.Component.Component):
                     partition.get('reservations').remove(reservation)
                     self.pbslog.log("F", reservation[0], datetime=datetime.fromtimestamp(current_time),
                         # no attributes
-                    )
-                    self.pbslog.log("K", reservation[0], datetime=datetime.fromtimestamp(current_time),
-                        requester = reservation[1], # who requested the resource reservation
                     )
         self.ResQueueSync()
 
