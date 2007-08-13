@@ -217,7 +217,11 @@ class Component(SSLServer,
                 self.logger.info("Statefile load failed %s" % sys.exc_info()[1])
                 return
             if len(loaddata) < len(self.__statefields__):
-                self.logger.info("Statefile does not define %s fields." % (len(self.__statefields__) - len(loaddata)))
+                missing_fields = self.__statefields__[len(loaddata):]
+                self.logger.info("Statefile does not define %s fields: %s" % (
+                    len(missing_fields),
+                    ", ".join(missing_fields),
+                ))
             for field in self.__statefields__[:len(loaddata)]:
                 setattr(self, field, loaddata[self.__statefields__.index(field)])
                 
