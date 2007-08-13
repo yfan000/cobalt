@@ -441,7 +441,6 @@ class BGSched(Cobalt.Component.Component):
     __name__ = 'scheduler'
     #__statefields__ = ['partitions', 'jobs']
     __statefields__ = ['partitions', 'log_state']
-    __legacy_statefields__ = ['partitions']
     __schedcycle__ = 10
     async_funcs = ['assert_location', 'RunQueue',
                    'RemoveOldReservations', 'ResQueueSync', 'CheckReservations']
@@ -473,17 +472,6 @@ class BGSched(Cobalt.Component.Component):
         self.register_function(self.ReleaseReservation, "DelReservation")
         self.register_function(self.SetReservation, "SetReservation")
     
-    def load_state (self, *args, **kwargs):
-        """Support legacy state data."""
-        try:
-            Cobalt.Component.Component.load_state(self, *args, **kwargs)
-        except (IndexError, AttributeError):
-            self.logger.info("Statefile load failed %s" % sys.exc_info()[1])
-            self.logger.info("falling back to legacy statefile format...")
-            self.__statefields__ = self.__legacy_statefields__ # this is in the instance scope
-            Cobalt.Component.Component.load_state(self, *args, **kwargs)
-            del self.__statefields__ # remove instance variable; class variable reactivated
-
     def GetReservations(self):
         '''build a list of reservation names in use'''
         reservs = []
