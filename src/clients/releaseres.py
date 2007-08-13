@@ -47,6 +47,6 @@ if __name__ == '__main__':
     else:
         spec = [{'tag':'partition', 'name':p} for p in parts]
     user = getpass.getuser()
-    result = scheduler.DelReservation(spec, args[0], user=user)
+    result = scheduler.DelReservation(spec, args[0], user)
     print "Released reservation '%s', matched on %d partitions" % \
           (args[0], len(result))
