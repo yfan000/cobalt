@@ -19,8 +19,6 @@ if __name__ == '__main__':
     (opts, command) = Cobalt.Util.dgetopt_long(sys.argv[1:],
                                                options, doptions, helpmsg)
 
-    print opts
-
     # need to filter here for all args
     if opts['version']:
         print "qselect %s" % __revision__
