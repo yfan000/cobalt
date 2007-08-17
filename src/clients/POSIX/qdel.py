@@ -27,7 +27,7 @@ if __name__ == '__main__':
     if '-d' in sys.argv:
         level = 10
     user = pwd.getpwuid(os.getuid())[0]
-    Cobalt.Logging.setup_logging('cqdel', to_syslog=False, level=level)
+    Cobalt.Logging.setup_logging('qdel', to_syslog=False, level=level)
     try:
         cqm = Cobalt.Proxy.queue_manager()
     except Cobalt.Proxy.CobaltComponentError:
@@ -42,5 +42,5 @@ if __name__ == '__main__':
         print "      Deleted Jobs"
         Cobalt.Util.print_tabular(data)
     else:
-        print "cqdel: Job %s not found" % sys.argv[-1]
+        print "qdel: Job %s not found" % sys.argv[-1]
 

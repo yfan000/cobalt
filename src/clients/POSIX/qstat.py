@@ -7,9 +7,9 @@ __version__ = '$Version$'
 import math, os, re, sys, time, types, ConfigParser
 import Cobalt.Logging, Cobalt.Proxy, Cobalt.Util
 
-__helpmsg__ = "Usage: cqstat [-d] [-f] [-l] [--header] <jobid> <jobid>\n" + \
-              "       cqstat [-d] -Q <queue> <queue>\n" + \
-              "       cqstat [--version]"
+__helpmsg__ = "Usage: qstat [-d] [-f] [-l] [--header] <jobid> <jobid>\n" + \
+              "       qstat [-d] -Q <queue> <queue>\n" + \
+              "       qstat [--version]"
 
 def get_elapsed_time(starttime, endtime):
     """
@@ -49,7 +49,7 @@ def mergelist(locations):
 
 if __name__ == '__main__':
     if '--version' in sys.argv:
-        print "cqstat %s" % __revision__
+        print "qstat %s" % __revision__
         print "cobalt %s" % __version__
         raise SystemExit, 0
     if '-h' in sys.argv or '--help' in sys.argv:
@@ -80,9 +80,9 @@ if __name__ == '__main__':
         level = 10
 
     if opts['version']:
-        print "cqstat %s" % __revision__
+        print "qstat %s" % __revision__
         raise SystemExit, 0
-    Cobalt.Logging.setup_logging('cqstat', to_syslog=False, level=level)
+    Cobalt.Logging.setup_logging('qstat', to_syslog=False, level=level)
 
     jobid = None
 

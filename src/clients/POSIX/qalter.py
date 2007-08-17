@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-'''Cobalt qsub command'''
+'''Cobalt qalter command'''
 __revision__ = '$Revision: 559 $'
 __version__ = '$Version$'
 
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     if '-d' in sys.argv:
         level = 10
     Cobalt.Logging.setup_logging('qalter', to_syslog=False, level=level)
-    logger = logging.getLogger('cqsub')
+    logger = logging.getLogger('qalter')
 
     CP = ConfigParser.ConfigParser()
     CP.read(['/etc/cobalt.conf'])

@@ -59,7 +59,7 @@ if __name__ == '__main__':
                                                options, doptions, helpmsg)
     # need to filter here for all args
     if opts['version']:
-        print "cqsub %s" % __revision__
+        print "qsub %s" % __revision__
         print "cobalt %s" % __version__
         raise SystemExit, 1
 
@@ -67,8 +67,8 @@ if __name__ == '__main__':
     level = 30
     if '-d' in sys.argv:
         level = 10
-    Cobalt.Logging.setup_logging('cqsub', to_syslog=False, level=level)
-    logger = logging.getLogger('cqsub')
+    Cobalt.Logging.setup_logging('qsub', to_syslog=False, level=level)
+    logger = logging.getLogger('qsub')
 
     CP = ConfigParser.ConfigParser()
     CP.read(['/etc/cobalt.conf'])
@@ -200,7 +200,7 @@ if __name__ == '__main__':
     if opts['output']:
         jobspec.update({'outputpath': opts['output']})
     if opts['held']:
-        jobspec.update({'state':'hold'})
+        jobspec.update({'state':'user hold'})
     if opts['env']:
         jobspec['envs'] = {}
         [jobspec['envs'].update({key:value}) for key, value
@@ -239,7 +239,7 @@ if __name__ == '__main__':
             logger.error("System draining. Try again later")
             raise SystemExit, 1
         elif flt.faultCode == 30:
-            logger.error("Job submission failed because: \n%s\nCheck 'cqstat -q' and the cqstat manpage for more details." % flt.faultString)
+            logger.error("Job submission failed because: \n%s\nCheck 'qstat -q' and the qstat manpage for more details." % flt.faultString)
             raise SystemExit, 1
         elif flt.faultCode == 1:
             logger.error("Job submission failed due to queue-manager failure")
