@@ -189,11 +189,13 @@ class Component(SSLServer,
 
     def save_state(self):
         '''Save fields defined in __statefields__ in /var/spool/cobalt/__implementation__'''
+        statefile_name = "/var/spool/cobalt/%s" % self.__implementation__
+        temp_statefile_name = statefile_name + ".temp"
         if self.__statefields__:
             self.logger.debug("saving state for %s" % self.__statefields__)
             savedata = tuple([getattr(self, field) for field in self.__statefields__])
         try:
-            statefile = open("/var/spool/cobalt/%s" % self.__implementation__, 'w')
+            statefile = open(temp_statefile_name, 'w')
             # need to flock here
             #print cPickle.dumps(savedata)
             #statefile.write(cPickle.dumps(savedata))
@@ -202,6 +204,8 @@ class Component(SSLServer,
         except:
             self.logger.info("Statefile save failed; data persistence disabled: %s" % sys.exc_info()[1])
             self.__statefields__ = []
+        else:
+            os.rename(temp_statefile_name, statefile_name)
 
     def load_state(self):
         '''Load fields defined in __statefields__ from /var/spool/cobalt/__implementation__'''
@@ -216,7 +220,13 @@ class Component(SSLServer,
             except:
                 self.logger.info("Statefile load failed %s" % sys.exc_info()[1])
                 return
-            for field in self.__statefields__:
+            if len(loaddata) < len(self.__statefields__):
+                missing_fields = self.__statefields__[len(loaddata):]
+                self.logger.info("Statefile does not define %s fields: %s" % (
+                    len(missing_fields),
+                    ", ".join(missing_fields),
+                ))
+            for field in self.__statefields__[:len(loaddata)]:
                 setattr(self, field, loaddata[self.__statefields__.index(field)])
                 
     def addr_system_listMethods(self, address):

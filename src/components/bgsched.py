@@ -3,6 +3,7 @@
 '''Super-Simple Scheduler for BG/L'''
 __revision__ = '$Revision$'
 
+from datetime import datetime
 import copy, logging, sys, time, xmlrpclib, ConfigParser
 import Cobalt.Component, Cobalt.Data, Cobalt.Logging, Cobalt.Proxy, Cobalt.Util
 
@@ -423,7 +424,7 @@ class PartitionSet(Cobalt.Data.DataSet):
             return []
         return self.PlaceFIFO(qpotential[queue], depinfo)
 
-    def PlaceSpruce(self, qpotential, queue, depinfo):
+    def PlaceSpruceOld(self, qpotential, queue, depinfo):
         '''Defer other jobs which spruce queue has idle jobs'''
         idle = [job for job in self.jobs if job.get('queue') == queue \
                   and job.get('state') == 'queued']
@@ -433,16 +434,26 @@ class PartitionSet(Cobalt.Data.DataSet):
             for q in qpotential:
                 qpotential[q] = {}
         return p
+
+    def PlaceSpruce(self, qpotential, queue, depinfo):
+        '''Defer non-reservation jobs when idle jobs in queue'''
+        idle = [job for job in self.jobs if job.get('queue') == queue \
+                and job.get('state') == 'queued']
+        p = self.PlaceFIFO(qpotential, queue, depinfo)
+        if len(p) != len(idle):
+            for qname in [q for q in qpotential if not q.startswith('R.')]:
+                qpotential[qname] = {}
+        return p
                 
 class BGSched(Cobalt.Component.Component):
     '''This scheduler implements a fifo policy'''
     __implementation__ = 'bgsched'
     __name__ = 'scheduler'
     #__statefields__ = ['partitions', 'jobs']
-    __statefields__ = ['partitions']
+    __statefields__ = ['partitions', 'log_state']
     __schedcycle__ = 10
     async_funcs = ['assert_location', 'RunQueue',
-                   'RemoveOldReservations', 'ResQueueSync']
+                   'RemoveOldReservations', 'ResQueueSync', 'CheckReservations']
 
     def __init__(self, setup):
         self.partitions = PartitionSet()
@@ -451,6 +462,10 @@ class BGSched(Cobalt.Component.Component):
         self.executed = []
         self.qmconnect = FailureMode("QM Connection")
         self.lastrun = 0
+        self.pbslog = Cobalt.Util.PBSLog()
+        self.log_state = dict(
+            reservation_begun = dict(),
+        )
         self.register_function(lambda  address,
                                data:self.partitions.Get(data),
                                "GetPartition")
@@ -466,7 +481,7 @@ class BGSched(Cobalt.Component.Component):
         self.register_function(self.AddReservation, "AddReservation")
         self.register_function(self.ReleaseReservation, "DelReservation")
         self.register_function(self.SetReservation, "SetReservation")
-
+    
     def GetReservations(self):
         '''build a list of reservation names in use'''
         reservs = []
@@ -479,6 +494,28 @@ class BGSched(Cobalt.Component.Component):
                         names.append(res[0])
                         reservs.append(res)
         return reservs
+    
+    def CheckReservations (self):
+        current_time = time.time()
+        for reservation in self.GetReservations():
+            name, user, start, duration = reservation
+            if start <= current_time and ((name, start) not in self.log_state['reservation_begun'].keys() or not self.log_state['reservation_begun'][(name, start)]):
+                self.log_state['reservation_begun'][(name, start)] = True
+                self.pbslog.log("B", name, datetime=datetime.fromtimestamp(start),
+                    owner = user or "N/A", # name of party who submitted the resource reservation request
+                    name = name, # optional reservation name
+                    #account = , # optional accounting string
+                    #queue = , # name of the instantiated reservation queue or the name of the queue of the reservation-job
+                    #ctime = , # time at which the resource reservation was created
+                    start = start, # time at which the reservation period is to start
+                    end = start + duration, # time at which the reservation period is to end
+                    duration = duration, # duration specified or computed for the resource reservation
+                    #exec_host = , #nodes and node-associated resources
+                    #authorized_users = , #the list of acl_users on the queue that is instantiated to service the reservation
+                    #authorized_groups = , if specified, the list of acl_groups on the queue that is instantiated to service the reservation
+                    #authorized_hosts = , if specified, the list of acl_hosts on the queue that is instantiated to service the reservation
+                    #Resource_List__dot__RES, # list of resources requested by the reservation
+                )
 
     def SetReservation(self,  _, spec, name, user, start, duration):
         '''updates reservations'''
@@ -489,8 +526,18 @@ class BGSched(Cobalt.Component.Component):
         for ap in affected_partitions:
             for res in ap['reservations']:
                 if res[0] == name:
+                    dt = datetime.now()
                     ap['reservations'].remove(res)
+                    self.pbslog.log("K", res[0], datetime=dt,
+                        requester = user or "N/A", # who deleted the resource reservation
+                    )
+                    self.pbslog.log("U", name, datetime=dt,
+                        requester = user or "N/A", # who requested the resources reservation
+                    )
                     ap['reservations'].append((name, user, start, duration))
+                    self.pbslog.log("Y", name, datetime=dt,
+                        requester = user or "N/A", # who requested the resource reservation
+                    )
                     resv_updates.append((name, user, start, duration))
         #now update queues
         self.ResQueueSync(updates=resv_updates)
@@ -538,17 +585,28 @@ class BGSched(Cobalt.Component.Component):
 
     def AddReservation(self, _, spec, name, user, start, duration):
         '''Add a reservation to matching partitions'''
+        self.pbslog.log("U", name,
+            requester = user or "N/A", # who requested the resources reservation
+        )
         reservation = (name, user, start, duration)
         data = self.partitions.Get(spec, callback=lambda x,
                                    y:x.get('reservations').append(reservation))
         self.ResQueueSync()
+        self.pbslog.log("Y", name,
+            requester = user or "N/A", # who requested the resources reservation
+        )
         return data
     
-    def ReleaseReservation(self, _, spec, name):
+    def ReleaseReservation(self, _, spec, name, user=None):
         '''Release specified reservation'''
-        cb = lambda x, y: [x.get('reservations').remove(rsv)
-                           for rsv in x.get('reservations')
-                           if rsv[0] == name]
+        def cb (x, y):
+            reservations = x.get('reservations')
+            for rsv in reservations:
+                if rsv[0] == name:
+                    reservations.remove(rsv)
+                    self.pbslog.log("k", name,
+                        requester = user or rsv[1] or "N/A",
+                    )
         data = self.partitions.Get(spec, cb)
         self.ResQueueSync()
         return data
@@ -557,8 +615,12 @@ class BGSched(Cobalt.Component.Component):
         '''Release all reservations that have expired'''
         for partition in self.partitions:
             for reservation in partition.get('reservations'):
-                if (reservation[2] + reservation[3]) < time.time():
+                current_time = time.time()
+                if (reservation[2] + reservation[3]) < current_time:
                     partition.get('reservations').remove(reservation)
+                    self.pbslog.log("F", reservation[0], datetime=datetime.fromtimestamp(current_time),
+                        # no attributes
+                    )
         self.ResQueueSync()
 
     def SupressDuplicates(self, provisional):

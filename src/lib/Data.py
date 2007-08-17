@@ -35,11 +35,19 @@ class RandomID(object):
 class Data(object):
     '''Data takes nested dictionaries and builds objects analogous to sss.restriction.data objects'''
     required_fields = []
+    
+    def _get_tag (self):
+        try:
+            return self.get('tag')
+        except KeyError, e:
+            return None
+    
+    def _set_tag (self, value):
+        self.set('tag', value)
+    
+    tag = property(_get_tag, _set_tag)
 
     def __init__(self, info):
-        if info.has_key('tag'):
-            self.tag = info['tag']
-            del info['tag']
         missing = [field for field in self.required_fields if not info.has_key(field)]
         if missing:
             raise DataCreationError, missing
@@ -49,11 +57,12 @@ class Data(object):
 
     def get(self, field, default=None):
         '''return attribute'''
-        if self._attrib.has_key(field):
+        try:
             return self._attrib[field]
-        if default != None:
-            return default
-        raise KeyError, field
+        except KeyError:
+            if default is not None:
+                return default
+            raise
 
     def set(self, field, value):
         '''set attribute'''
@@ -67,13 +76,17 @@ class Data(object):
             
     def match(self, spec):
         '''Implement datatype matching'''
-        fields = [field for field in spec if field != 'tag']
-        return self.tag == spec['tag'] and not [field for field in fields if spec[field] != '*' and (self.get(field) != spec[field])]
+        fields_delta = [field for field in spec
+            if spec[field] != '*'
+            and (self.get(field) != spec[field])
+        ]
+        return not fields_delta
         
     def to_rx(self, spec):
         '''return transmittable version of instance'''
-        rxval = {'tag':self.tag}
-        for field in [field for field in spec.keys() if field != 'tag' and self._attrib.has_key(field)]:
+        rxval = dict()
+        rx_fields = [field for field in spec.keys() if self._attrib.has_key(field)]
+        for field in rx_fields:
             rxval[field] = self.get(field)
         return rxval
 
@@ -97,10 +110,19 @@ class DataSet(object):
         '''remove an element from the set'''
         return self.data.remove(x)
 
-    def Add(self, cdata, callback=None, cargs=()):
-        '''Implement semantics of operations that add new item(s) to the DataSet'''
+    def Add(self, cdata, callback=None, cargs={}):
+        """Construct new items of type self.__object__ in the dataset.
+        
+        Arguments:
+        cdata -- The first argument to be passed to the data constructor.
+            If cdata is a list, construct multiple items.
+        callback -- Applied to each new item after it is constructed. (optional)
+        cargs -- A tuple of arguments to pass to callback after the new object.
+        
+        Returns a list of transmittable representations of the new items.
+        """
         retval = []
-        if type(cdata) != types.ListType:
+        if not isinstance(cdata, types.ListType):
             cdata = [cdata]
         for item in cdata:
             try:
@@ -113,15 +135,24 @@ class DataSet(object):
                 raise xmlrpclib.Fault(8, str(missing))
             #return xmlrpclib.dumps(xmlrpclib.Fault(8, str(missing)))
             # uniqueness test goes here
-            self.data.append(iobj)
+            self.append(iobj)
             if callback:
-                apply(callback, (iobj, ) + cargs)
+                callback(iobj, cargs)
             retval.append(iobj.to_rx(item))
         return retval
 
     def Get(self, cdata, callback=None, cargs={}):
-        '''Implement semantics of operations that get item(s) from the DataSet'''
+        """Return a list of transmittable representations of items.
+        
+        Arguments:
+        cdata -- A dictionary representing criteria to match.
+            If cdata is a list, match against multiple sets of criteria.
+        callback -- Applied to each matched item. (optional)
+        cargs -- A tuple of arguments to pass to callback after the item.
+        """
         retval = []
+        if not isinstance(cdata, types.ListType):
+            cdata = [cdata]
         for spec in cdata:
             for item in [datum for datum in self.data if datum.match(spec)]:
                 if callback:
@@ -130,7 +161,14 @@ class DataSet(object):
         return retval
 
     def Del(self, cdata, callback=None, cargs={}):
-        '''Implement semantics of operations that delete item(s) from the DataSet'''
+        """Delete items from the dataset.
+        
+        Arguments:
+        cdata -- A dictionary representing criteria to match.
+            If cdata is a list, match against multiple sets of criteria.
+        callback -- Applied to each matched item. (optional)
+        cargs -- A tuple of arguments to pass to callback after the item.
+        """
         retval = []
         if not isinstance(cdata, types.ListType):
             cdata = [cdata]
