@@ -18,6 +18,9 @@ if __name__ == '__main__':
                 'q':'queue', 'h':'held'}
     (opts, command) = Cobalt.Util.dgetopt_long(sys.argv[1:],
                                                options, doptions, helpmsg)
+
+    print opts
+
     # need to filter here for all args
     if opts['version']:
         print "qselect %s" % __revision__
@@ -86,7 +89,7 @@ if __name__ == '__main__':
     else:
         query['mode'] = '*'
 
-    if opts['project']:
+    if opts['project'] is not False:
         query['project'] = opts['project']
     else:
         query['project'] = '*'
@@ -106,7 +109,6 @@ if __name__ == '__main__':
 
         query['tag'] = 'job'
         query['jobid'] = '*'
-        print query
         response = cqm.GetJobs([query])
 
     except Cobalt.Proxy.CobaltComponentError:
