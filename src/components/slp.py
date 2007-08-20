@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''slp provides the service location protocol'''
-__revision__ = '$Revision:$'
+__revision__ = '$Revision$'
 
 from select import select, error as selecterror
 from time import time
@@ -10,7 +10,7 @@ import getopt
 import sys
 
 from Cobalt.Data import Data, DataSet
-from Cobalt.Component import Component
+from Cobalt.Component import Component, expose
 
 import Cobalt.Logging
 
@@ -39,9 +39,6 @@ class Slp(Component, DataSet):
     def __init__(self, setup):
         Component.__init__(self, setup)
         DataSet.__init__(self)
-        self.register_function(self.assert_service, "AssertService")
-        self.register_function(self.lookup_service, "LookupService")
-        self.register_function(self.deassert_service, "DeassertService")
 
     def assert_service(self, address, data):
         '''Assert service with slp'''
@@ -51,6 +48,7 @@ class Slp(Component, DataSet):
             self.logger.info("Adding new service %s at %s" % (data['name'], data['url']))
             retval = self.Add([data])
         return retval
+    assert_service = expose("AssertService")(assert_service)
 
     def lookup_service(self, address, service):
         '''Lookup a service in the slp'''
@@ -58,6 +56,7 @@ class Slp(Component, DataSet):
         if not retval:
             raise Fault(11, "No Matching Service")
         return retval
+    lookup_service = expose("LookupService")(lookup_service)
 
     def deassert_service(self, address, spec):
         '''Remove service registration'''
@@ -66,6 +65,7 @@ class Slp(Component, DataSet):
         if not retval:
             raise Fault(11, "No Matching Service")
         return retval
+    deassert_service = expose("DeassertService")(deassert_service)
 
     def timeout_services(self):
         '''Remove services that havent asserted in __svctimeout__'''

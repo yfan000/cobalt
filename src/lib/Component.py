@@ -1,6 +1,8 @@
 '''Cobalt component base classes'''
 __revision__ = '$Revision$'
 
+import inspect
+
 import atexit, gc, logging, os, select, signal, socket, sys, time, urlparse, xmlrpclib, cPickle, ConfigParser
 import BaseHTTPServer, Cobalt.Proxy, OpenSSL.SSL, SimpleXMLRPCServer, SocketServer
 
@@ -75,6 +77,34 @@ class SSLServer(BaseHTTPServer.HTTPServer):
         self.server_bind()
         self.server_activate()
 
+
+def expose (rpc_name):
+    """A decorator for exposing a normal function as an XMLRPC function.
+    
+    Arguments:
+    rpc_name -- The name that the function should have for the RPC.
+    
+    In Python >= 2.4:
+    @expose("DoSomething")
+    def do_something():
+        ...
+    
+    In Python >= 2.2:
+    def do_something():
+        ...
+    do_something = expose("DoSomething")(do_something)
+    """
+    
+    def actual_decorator (method):
+        try:
+            method.rpc_names.append(rpc_name)
+        except AttributeError:
+            method.rpc_names = [rpc_name]
+        return method
+    
+    return actual_decorator
+
+
 class Component(SSLServer,
                 SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     """Cobalt component providing XML-RPC access"""
@@ -138,6 +168,17 @@ class Component(SSLServer,
 
         if self.__statefields__:
             self.load_state()
+        
+        self._register_functions()
+    
+    def _register_functions (self):
+        """Register methods having rpc_names as rpc functions."""
+        methods = inspect.getmembers(self, inspect.ismethod)
+        methods = [method[1] for method in methods]
+        for method in methods:
+            if hasattr(method, "rpc_names"):
+                for name in method.rpc_names:
+                    self.register_function(method, name)
 
     def HandleEvents(self, address, event_list):
         '''Default event handler'''
