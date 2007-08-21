@@ -56,8 +56,8 @@ class Data(object):
     required_fields
     """
     
-    fields = dict() # Fields expected to be set for the entity.
-    required_fields = [] # Fields that must be specified when the entity is created.
+    fields = dict()
+    required_fields = []
     
     def __init__(self, spec):
         
@@ -67,17 +67,22 @@ class Data(object):
         spec -- A dictionary specifying the values of fields on the entity.
         """
         
-        missing_fields = [
-            field for field in self.required_fields
-            if not spec.has_key(field)
-        ]
-        if missing_fields:
-            raise DataCreationError, missing_fields
+        for field in self.required_fields:
+            if field not in spec:
+                raise DataCreationError, field
         
-        self._attrib = self.fields.copy()
-        self.set('stamp', time.time())
-        self._attrib.update(spec)
-
+        for field, value in self.fields.iteritems():
+            setattr(self, field, value)
+        
+        for field, value in spec.iteritems():
+            setattr(self, field, value)
+        
+        self.touch()
+    
+    def touch (self):
+        """Update the timestamp."""
+        self.stamp = time.time()
+    
     def get(self, field, default=None):
         """Get the value of field from the entity.
         
@@ -85,7 +90,15 @@ class Data(object):
         field -- The field to get the value of.
         default -- Value to return if field is not set. (default None)
         """
-        return self._attrib.get(field, default)
+        try:
+            return getattr(self, field)
+        except AttributeError:
+            return default
+    
+    def __setattr__ (self, name, value):
+        object.__setattr__(self, name, value)
+        if name is not "stamp":
+            object.__setattr__(self, "stamp", time.time())
 
     def set(self, field, value):
         """Set the value of field on the entity.
@@ -94,32 +107,16 @@ class Data(object):
         field -- The field to set the value of.
         value -- Value to set on the field.
         """
-        self._attrib[field] = value
-        self._attrib['stamp'] = time.time()
+        setattr(self, field, value)
 
     def update(self, spec):
-        """Updated the values of multiple field on an entity.
+        """Update the values of multiple fields on an entity.
         
         Arguments:
         spec -- A dictionary specifying the values of fields to set.
         """
         for key, value in spec.iteritems():
             self.set(key, value)
-    
-    def _get_tag (self):
-        """Get the value of the tag field."""
-        return self.get('tag')
-    
-    def _set_tag (self, value):
-        """Set the value of the tag field.
-        
-        Arguments:
-        value -- New tag value.
-        """
-        self.set('tag', value)
-    
-    # Attribute-style access to tag, for backwards-compatibility.
-    tag = property(_get_tag, _set_tag)
             
     def match(self, spec):
         """True if every field in spec == the same field on the entity.
@@ -256,11 +253,17 @@ class DataSet(object):
 class ForeignData(Data):
     
     def Sync (self, spec):
-        """directly update attributes based on spec.
+        """Update the values of multiple fields on an entity.
         
-        Specifically, this does not automatically update the stamp.
+        Ensures that any specified timestamp remains consistent.
+        
+        Arguments:
+        spec -- A dictionary specifying the values of fields to set.
         """
-        self._attrib.update(spec)
+        for key, value in spec.iteritems():
+            setattr(self, key, value)
+        if "stamp" in spec:
+            self.stamp = spec['stamp']
 
 class ForeignDataSet(DataSet):
     __oserror__ = Cobalt.Util.FailureMode("ForeignData connection")
