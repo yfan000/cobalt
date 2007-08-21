@@ -3,19 +3,27 @@ import itertools
 
 import Cobalt.Data
 
+
 class TestIncrID (object):
     
     def test_get (self, max=100):
         generator = Cobalt.Data.IncrID()
-        for id in itertools.count(1):
-            assert generator.get() == id
-            if id >= max:
+        for count in itertools.count(1):
+            assert generator.get() == count
+            if count >= max:
+                break
+    
+    def test_next (self, max=100):
+        generator = Cobalt.Data.IncrID()
+        for count in itertools.count(1):
+            assert generator.next() == count
+            if count >= max:
                 break
 
 
 class TestRandomID (object):
     
-    def test_get (self, count=1000):
+    def test_get (self, count=100):
         generator = Cobalt.Data.RandomID()
         id_list = []
         while True:
@@ -24,7 +32,16 @@ class TestRandomID (object):
             id_list.append(id)
             if len(id_list) >= count:
                 break
-        assert len(id_list) == count
+    
+    def test_next (self, count=100):
+        generator = Cobalt.Data.RandomID()
+        id_list = []
+        while True:
+            id = generator.next()
+            assert id not in id_list
+            id_list.append(id)
+            if len(id_list) >= count:
+                break
 
 
 class TestData (object):
@@ -79,16 +96,6 @@ class TestData (object):
         for key, value in self.FIELDS.items():
             assert data.get(key) == value
     
-    def test_get_undefined (self):
-        data = Cobalt.Data.Data(self.FIELDS)
-        for key, value in self.INVALID_FIELDS.items():
-            try:
-                data.get(key)
-            except KeyError:
-                pass
-            else:
-                assert not "Can't get undefined data."
-    
     def test_get_default (self):
         data = Cobalt.Data.Data(self.FIELDS)
         
@@ -96,6 +103,7 @@ class TestData (object):
             assert data.get(key, default) == value
         
         for key, value in self.INVALID_FIELDS.items():
+            assert data.get(key) is None
             assert data.get(key, value) == value
     
     def test_set (self):
@@ -129,9 +137,6 @@ class TestData (object):
         
         rx = data.to_rx(self.FIELDS)
         assert rx == self.FIELDS
-        
-        rx = data.to_rx(self.INVALID_FIELDS)
-        assert not rx
 
 
 class TestForeignData (TestData):
