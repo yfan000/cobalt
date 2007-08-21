@@ -56,11 +56,14 @@ class Data(object):
     """A Cobalt entity manager.
     
     Class attributes:
-    fields
-    required_fields
+    fields -- Public fields for the entity.
+    required_fields -- Fields that must be specified at initialization.
     """
     
-    fields = dict()
+    fields = dict(
+        tag = None,
+        stamp = None,
+    )
     required_fields = []
     
     def __init__(self, spec):
@@ -71,15 +74,15 @@ class Data(object):
         spec -- A dictionary specifying the values of fields on the entity.
         """
         
-        for field in self.required_fields:
-            if field not in spec:
-                raise DataCreationError, field
-        
         for field, value in self.fields.iteritems():
             self.set(field, value)
         
         for field, value in spec.iteritems():
             self.set(field, value)
+        
+        for field in self.required_fields:
+            if self.get(field) is None:
+                raise DataCreationError, field
         
         self.touch()
     
