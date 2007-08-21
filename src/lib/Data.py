@@ -5,9 +5,11 @@ import time, types, xmlrpclib, random
 import Cobalt.Util
 import Cobalt.Proxy
 
+
 class DataCreationError(Exception):
     '''Used when a new object cannot be created'''
     pass
+
 
 class IncrID(object):
     
@@ -25,6 +27,7 @@ class IncrID(object):
     def next (self):
         """Iterator interface."""
         return self.get()
+
 
 class RandomID(object):
     """Generator for non-repeating random integer IDs."""
@@ -53,6 +56,7 @@ class Data(object):
     """A Cobalt entity manager.
     
     Class attributes:
+    fields
     required_fields
     """
     
@@ -72,10 +76,10 @@ class Data(object):
                 raise DataCreationError, field
         
         for field, value in self.fields.iteritems():
-            setattr(self, field, value)
+            self.set(field, value)
         
         for field, value in spec.iteritems():
-            setattr(self, field, value)
+            self.set(field, value)
         
         self.touch()
     
@@ -250,6 +254,7 @@ class DataSet(object):
     def Match(self, spec):
         return [item for item in self.data if item.match(spec)]
 
+
 class ForeignData(Data):
     
     def Sync (self, spec):
@@ -260,10 +265,10 @@ class ForeignData(Data):
         Arguments:
         spec -- A dictionary specifying the values of fields to set.
         """
-        for key, value in spec.iteritems():
-            setattr(self, key, value)
+        self.update(spec)
         if "stamp" in spec:
             self.stamp = spec['stamp']
+
 
 class ForeignDataSet(DataSet):
     __oserror__ = Cobalt.Util.FailureMode("ForeignData connection")
