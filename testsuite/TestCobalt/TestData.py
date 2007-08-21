@@ -56,15 +56,6 @@ class TestData (object):
         five = 5,
     )
     
-    def test_tag (self):
-        data = Cobalt.Data.Data({})
-        assert data.tag is None
-        
-        data = Cobalt.Data.Data({
-            'tag': self.TAG,
-        })
-        assert data.tag == self.TAG
-    
     def test_required_fields (self):
         class NewData (Cobalt.Data.Data):
             required_fields = self.FIELDS.keys()
