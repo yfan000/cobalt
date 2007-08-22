@@ -102,7 +102,7 @@ class BGProcessManager(Cobalt.Component.Component, Cobalt.Data.DataSet):
             self.lastwait = time.time()
             #get existing jobs from system component and compare to local list
             print 'querying jobs', time.ctime()
-            result = self.comms['sys'].QueryJobs([pg.to_rx(pg._attrib) for pg in self.data])
+            result = self.comms['sys'].QueryJobs([pg.to_rx() for pg in self.data])
             result_pgs = [pg.get('pgid') for pg in result]
             for pg in self:
                 print pg.get('pgid'), pg.get('pid'), pg.get('state')
