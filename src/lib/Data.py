@@ -86,6 +86,23 @@ class Data(object):
         
         self.touch()
     
+    def __setstate__ (self, state):
+        state = state.copy()
+        
+        if "_attrib" in state:
+            
+            def update_field (field):
+                if field is "exit-status":
+                    return "exitstatus"
+                return field
+            
+            for field, value in state["_attrib"]:
+                field = update_field(field)
+                state[field] = value
+            
+            del state["_attrib"]
+            self.__dict__ = state
+    
     def touch (self):
         """Update the timestamp."""
         self.stamp = time.time()
