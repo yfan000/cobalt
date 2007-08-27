@@ -128,34 +128,95 @@ class TestData (object):
             one = 1,
             two = 2,
         )
+        special_cases = dict()
+        special_cases["exit-status"] = "exitstatus" # special case
+        _attrib.update(special_cases)
+        
         data = Cobalt.Data.Data(self.FIELDS)
         state = data.__dict__.copy()
         state["_attrib"] = _attrib # legacy value that setstate should change
         data.__setstate__(state)
+        
         assert not hasattr(data, "_attrib")
+        
         for key in state:
             if key is not "_attrib":
                 assert hasattr(data, key)
+        
         for key in _attrib:
-            assert hasattr(data, key)
+            if key in special_cases:
+                assert hasattr(data, special_cases[key])
+                assert not hasattr(data, key)
+            else:
+                assert hasattr(data, key)
     
     def test_to_rx (self):
         data = Cobalt.Data.Data(self.FIELDS)
         
         rx = data.to_rx(self.FIELDS)
         assert rx == self.FIELDS
+    
+    def test_to_rx_default (self):
+        class ExtendedData (Cobalt.Data.Data):
+            fields = Cobalt.Data.Data.fields.copy()
+            fields.update(dict(
+                self.FIELDS,
+            ))
+        data = ExtendedData({})
+        rx = data.to_rx()
+        for field in self.FIELDS:
+            assert field in rx
+    
+    def test_not_keyed (self):
+        dataset = Cobalt.Data.DataSet()
+        assert dataset.__unique__ is None
+        try:
+            dataset["somevalue"]
+        except KeyError:
+            pass
+        else:
+            assert not "Didn't raise KeyError for non-keyed data."
+    
+    def test_keyed (self):
+        class ExtendedDataSet (Cobalt.Data.DataSet):
+            __unique__ = "tag"
+        
+        dataset = ExtendedDataSet()
+        data = Cobalt.Data.Data({'tag':"asdf"})
+        dataset.append(data)
+        assert dataset["asdf"] is data
+        try:
+            dataset["invalid"] is not data
+        except KeyError:
+            pass
+        else:
+            assert not "Didn't raise KeyError for invalid key."
+    
+    def test_del_keyed (self):
+        class ExtendedDataSet (Cobalt.Data.DataSet):
+            __unique__ = "tag"
+        
+        dataset = ExtendedDataSet()
+        data = Cobalt.Data.Data({'tag':"asdf"})
+        dataset.append(data)
+        assert len(dataset.data) == 1
+        del dataset["asdf"]
+        assert len(dataset.data) == 0
 
 
 class TestForeignData (TestData):
     
     def test_Sync (self):
-        # argument 'data' should be 'spec'
-        # there should not be a reference to jobid here.
-        assert False
-        data = Cobalt.Data.Data(self.FIELDS)
-        upd_fields = self.FIELDS.copy()
-        for key, value in zip(upd_fields.keys(), self.INVALID_FIELDS.values()):
-            upd_fields[key] = value
+        data = Cobalt.Data.ForeignData({})
+        
+        fields = self.FIELDS.copy()
+        fields['stamp'] = "a specific value"
+        
+        data.Sync(fields)
+        for key, value in self.FIELDS.items():
+            if key != "stamp":
+                assert data.get(key) == value
+        assert data.stamp == fields['stamp']
 
 
 class TestDataSet (object):
@@ -326,3 +387,9 @@ class TestDataSet (object):
         for cb_cargs in cb_state['cargs']:
             for cb_carg, carg in zip(cb_cargs, self.CARGS):
                 assert cb_carg is carg
+
+
+class TestForeignDataSet (TestDataSet):
+    
+    def test_Sync (self):
+        assert not "I don't want to write tests for this until we refactor component."
