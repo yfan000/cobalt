@@ -140,7 +140,7 @@ class TestData (object):
         assert not hasattr(data, "_attrib")
         
         for key in state:
-            if key is not "_attrib":
+            if key != "_attrib":
                 assert hasattr(data, key)
         
         for key in _attrib:
@@ -186,7 +186,7 @@ class TestData (object):
         dataset.append(data)
         assert dataset["asdf"] is data
         try:
-            dataset["invalid"] is not data
+            dataset["invalid"] is data
         except KeyError:
             pass
         else:
@@ -386,7 +386,7 @@ class TestDataSet (object):
         data_set.Del(self.CDATA, callback, self.CARGS)
         for cb_cargs in cb_state['cargs']:
             for cb_carg, carg in zip(cb_cargs, self.CARGS):
-                assert cb_carg is carg
+                assert cb_carg == carg
 
 
 class TestForeignDataSet (TestDataSet):

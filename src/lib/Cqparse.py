@@ -328,7 +328,7 @@ class CobaltJob(Cobalt.Data.Data):
 
         # If the job is queued or running, the completion statistics will not
         # be available. Leave now.
-        if self.state is not "done":
+        if self.state != "done":
             return True
         
         #
@@ -439,7 +439,7 @@ class CobaltLogParser(Cobalt.Data.DataSet):
         """
         for jobid in self._jobs:
             job = self._jobs[jobid]
-            if job.state is "done":
+            if job.state == "done":
                 yield(job)
 
     def running_jobs(self):
@@ -448,7 +448,7 @@ class CobaltLogParser(Cobalt.Data.DataSet):
         """
         for jobid in self._jobs:
             job = self._jobs[jobid]
-            if job.state is "running":
+            if job.state == "running":
                 yield(job)
 
     def queued_jobs(self):
@@ -457,7 +457,7 @@ class CobaltLogParser(Cobalt.Data.DataSet):
         """
         for jobid in self._jobs:
             job = self._jobs[jobid]
-            if job.state is "queued":
+            if job.state == "queued":
                 yield(job)
 
 

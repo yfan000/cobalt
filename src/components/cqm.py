@@ -117,11 +117,11 @@ class Job(Cobalt.Data.Data):
             'Q;%s;%s;%s' % (self.jobid, self.user, self.queue))
     
     def __setattr__ (self, name, value):
-        if name is "state":
-            if value is "hold":
+        if name == "state":
+            if value == "hold":
                 self.timers['hold'] = Timer()
                 self.timers['hold'].Start()
-            elif self.state is "hold":
+            elif self.state == "hold":
                 self.timers['hold'].Stop()
         return Cobalt.Data.Data.__setattr__(self, name, value)
     
@@ -486,12 +486,12 @@ class Job(Cobalt.Data.Data):
                 self.SetPassive()
             if self.state in ['stage-error', 'pm-error']:
                 self.state = 'done'
-        elif self.state is 'running':
+        elif self.state == 'running':
             if not self.pgid.has_key('user'):
                 logger.error("Job %s has no pgroup associated with it" % self.jobid)
             else:
                 self.KillPGID(self.pgid['user'])
-        elif self.state is 'hold':  #job in 'hold' and running
+        elif self.state == 'hold':  #job in 'hold' and running
             self.KillPGID(self.pgid['user'])
         else:
             logger.error("Got qdel for job %s in unexpected state %s" % (self.jobid, self.state))
@@ -539,7 +539,7 @@ class Job(Cobalt.Data.Data):
 
     def over_time(self):
         '''Check if a job has run over its time'''
-        if self.state is 'running':
+        if self.state == 'running':
             runtime = self.timers['user'].Check()/60.0
             if float(self.walltime) < runtime:
                 return 1
@@ -743,7 +743,7 @@ class BGJob(Job):
         subj = 'Cobalt: Job %s/%s starting - %s/%s' % (self.jobid, self.user, self.queue, self.location)
         mmsg = "Job %s/%s starting on partition %s, in the '%s' queue , at %s" % (self.jobid, self.user, self.location, self.queue, time.strftime('%c', time.localtime()))
         toaddr = []
-        if self.adminemail is not '*':
+        if self.adminemail != '*':
             toaddr = toaddr + self.adminemail.split(':')
         if self.notify:
             toaddr = toaddr + self.notify.split(':')
@@ -759,7 +759,7 @@ class BGJob(Job):
         subj = 'Cobalt: Job %s/%s finished - %s/%s %s' % (self.jobid, self.user, self.queue, self.location, self.GetStats())
         mmsg = "Job %s/%s finished on partition %s, in the '%s' queue, at %s\nStats: %s" %  (self.jobid, self.user, self.location, self.queue, time.strftime('%c', time.localtime()), self.GetStats())
         toaddr = []
-        if self.adminemail is not '*':
+        if self.adminemail != '*':
             toaddr = toaddr + self.adminemail.split(':')
         if self.notify:
             toaddr = toaddr + self.notify.split(':')
@@ -899,7 +899,7 @@ class Restriction(Cobalt.Data.Data):
     def maxuserjobs(self, job, queuestate=None):
         '''limits how many jobs each user can run by checking queue state
         with potential job added'''
-        userjobs = [j for j in queuestate if j.user == job.user and j.state is 'running' and j.queue == job.queue]
+        userjobs = [j for j in queuestate if j.user == job.user and j.state == 'running' and j.queue == job.queue]
         if len(userjobs) >= int(self.value):
             return (False, "Maxuserjobs limit reached")
         else:
@@ -917,7 +917,7 @@ class Restriction(Cobalt.Data.Data):
         '''limits how many nodes a single user can have running'''
         usernodes = 0
         for j in [qs for qs in queuestate if qs.user == job.user
-                  and qs.state is 'running'
+                  and qs.state == 'running'
                   and qs.queue == job.queue]:
             usernodes = usernodes + int(j.nodes)
         if usernodes + int(job.nodes) > int(self.value):
@@ -929,7 +929,7 @@ class Restriction(Cobalt.Data.Data):
         '''limits how many total nodes can be used by jobs running in
         this queue'''
         totalnodes = 0
-        for j in [qs for qs in queuestate if qs.state is 'running'
+        for j in [qs for qs in queuestate if qs.state == 'running'
                   and qs.queue == job.queue]:
             totalnodes = totalnodes + int(j.nodes)
         if totalnodes + int(job.nodes) > int(self.value):
@@ -988,7 +988,7 @@ class RestrictionSet(Cobalt.Data.DataSet):
 #     def Test(self, job):
 #         '''Test queue restrictions'''
 #         probs = ''
-#         for restriction in [r for r in self.data if r.type is 'queue']:
+#         for restriction in [r for r in self.data if r.type == 'queue']:
 #             result = restriction.CanAccept(job, type='queue')
 #             if not result[0]:
 #                 probs = probs + result[1] + '\n'
@@ -1169,7 +1169,7 @@ class QueueSet(Cobalt.Data.DataSet):
                 jobs[0].extend(j)
             for job in jobs[0]:
                 [(oldjob, oldqueue)] = [(j, q) for q in self.data for j in q if j.jobid == job.jobid]
-                if oldjob.state is 'running':
+                if oldjob.state == 'running':
                     failed.append("Job %s not moved to queue '%s' because job is running" % (oldjob.jobid, cargs['queue']))
                     continue
                 newjob = copy.deepcopy(oldjob)
@@ -1216,7 +1216,7 @@ class QueueSet(Cobalt.Data.DataSet):
 
         # test job against queue restrictions
         probs = ''
-        for restriction in [r for r in testqueue.restrictions if r.type is 'queue']:
+        for restriction in [r for r in testqueue.restrictions if r.type == 'queue']:
             result = restriction.CanAccept(job)
             if not result[0]:
                 probs = probs + result[1] + '\n'
@@ -1233,7 +1233,7 @@ class QueueSet(Cobalt.Data.DataSet):
 
         [testqueue] = [q for q in self.data if q.name == newjob.queue]
         probs = ''
-        for restriction in [r for r in testqueue.restrictions if r.type is 'run']:
+        for restriction in [r for r in testqueue.restrictions if r.type == 'run']:
             result = restriction.CanAccept(newjob, qstate)
             if not result[0]:
                 probs = probs + result[1] + '\n'
@@ -1298,12 +1298,12 @@ class CQM(Cobalt.Component.Component):
             job.pbslog.log("A",
                 # No attributes.
             )
-        finished_jobs = [j for j in [j for queue in self.Queues for j in queue] if j.state is 'done']
+        finished_jobs = [j for j in [j for queue in self.Queues for j in queue] if j.state == 'done']
         for job in finished_jobs:
             job.LogFinish()
         [queue.remove(j) for (j, queue) in [(j, queue) for queue in self.Queues for j in queue] if j.state == 'done']
         [self.Queues.remove(q) for q in self.Queues.data[:]
-         if q.state is 'dead' and q.name.startswith('R.')
+         if q.state == 'dead' and q.name.startswith('R.')
          and len(q.data) == 0]
         #newdate = time.strftime("%m-%d-%y", time.localtime())
         #[j.acctlog.ChangeLog() for j in [j for queue in self.Queues for j in queue] if newdate != self.prevdate]
@@ -1323,7 +1323,7 @@ class CQM(Cobalt.Component.Component):
         for spec in data:
             for job, q in [(job, queue) for queue in self.Queues for job in queue if job.match(spec)]:
                 ret.append(job.to_rx(spec))
-                if job.state in ['queued', 'ready'] or (job.state is 'hold' and not job.pgid):
+                if job.state in ['queued', 'ready'] or (job.state == 'hold' and not job.pgid):
                     #q.remove(job)
                     q.Del(spec)
                 elif force:

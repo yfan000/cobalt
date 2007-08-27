@@ -119,7 +119,7 @@ class Data(object):
     
     def __setattr__ (self, name, value):
         object.__setattr__(self, name, value)
-        if name is not "stamp":
+        if name != "stamp":
             object.__setattr__(self, "stamp", time.time())
 
     def set(self, field, value):

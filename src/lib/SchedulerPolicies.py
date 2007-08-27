@@ -31,7 +31,7 @@ class DeferAll(FirstFit):
         if [job for job in idle \
             if self.qname in job.queue.split(':')]:
             for job in potential:
-                if job.queue is not self.qname and \
+                if job.queue != self.qname and \
                        not job.queue.startswith('R.'):
                     del potential[job]
 

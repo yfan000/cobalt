@@ -204,7 +204,7 @@ class PartitionSet(Cobalt.Data.DataSet):
                         baseblock = block
                         print 'block matches', block.get('ionodes')
                 for field in baseblock.fields:
-                    if not datum.has_key(field) and field is not 'stamp':
+                    if not datum.has_key(field) and field != 'stamp':
                         datum.update({field:baseblock.get(field)})
                 #datum.tag = 'partition'
                 Cobalt.Data.DataSet.Add(self, [datum])
