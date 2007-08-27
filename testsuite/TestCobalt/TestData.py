@@ -150,6 +150,26 @@ class TestData (object):
             else:
                 assert hasattr(data, key)
     
+    def test_setstate_defaults (self):
+        class ExtendedData (Cobalt.Data.Data):
+            fields = Cobalt.Data.Data.fields.copy()
+            fields.update(dict(
+                one = 1,
+                two = 2,
+            ))
+        
+        data = ExtendedData()
+        data.one = 3
+        data.two = 4
+        
+        state = data.__dict__.copy()
+        del state["one"]
+        del state["two"]
+        
+        data.__setstate__(state)
+        assert data.one == 1
+        assert data.two == 2
+    
     def test_to_rx (self):
         data = Cobalt.Data.Data(self.FIELDS)
         

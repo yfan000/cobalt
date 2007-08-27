@@ -87,8 +87,10 @@ class Data(object):
         
         self.touch()
     
-    def __setstate__ (self, state):
-        state = state.copy()
+    def __setstate__ (self, input_state):
+        
+        state = self.__class__.fields.copy()
+        state.update(input_state)
         
         if "_attrib" in state:
             _attrib = state["_attrib"]
