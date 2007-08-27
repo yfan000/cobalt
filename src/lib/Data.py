@@ -2,6 +2,7 @@
 __revision__ = '$Revision$'
 
 import time, types, xmlrpclib, random
+import warnings
 import Cobalt.Util
 import Cobalt.Proxy
 
@@ -115,6 +116,7 @@ class Data(object):
         field -- The field to get the value of.
         default -- Value to return if field is not set. (default None)
         """
+        warnings.warn("Use of Cobalt.Data.Data.get is deprecated. Use attributes in stead.", DeprecationWarning)
         try:
             return getattr(self, field)
         except AttributeError:
@@ -132,6 +134,10 @@ class Data(object):
         field -- The field to set the value of.
         value -- Value to set on the field.
         """
+        warnings.warn("Use of Cobalt.Data.Data.set is deprecated. Use attributes in stead.", DeprecationWarning)
+        if field not in self.fields:
+            warnings.warn("Creating a new field with set.", RuntimeWarning)
+            self.fields[field] = None
         setattr(self, field, value)
 
     def update(self, spec):
