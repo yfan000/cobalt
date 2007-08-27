@@ -96,12 +96,13 @@ class Data(object):
                     return "exitstatus"
                 return field
             
-            for field, value in state["_attrib"]:
+            _attrib = state["_attrib"]
+            for field in _attrib:
                 field = update_field(field)
-                state[field] = value
-            
+                state[field] = _attrib[field]
             del state["_attrib"]
-            self.__dict__ = state
+        
+        self.__dict__ = state
     
     def touch (self):
         """Update the timestamp."""

@@ -123,6 +123,22 @@ class TestData (object):
         
         assert not data.match(self.INVALID_FIELDS)
     
+    def test_setstate (self):
+        _attrib = dict(
+            one = 1,
+            two = 2,
+        )
+        data = Cobalt.Data.Data(self.FIELDS)
+        state = data.__dict__.copy()
+        state["_attrib"] = _attrib # legacy value that setstate should change
+        data.__setstate__(state)
+        assert not hasattr(data, "_attrib")
+        for key in state:
+            if key is not "_attrib":
+                assert hasattr(data, key)
+        for key in _attrib:
+            assert hasattr(data, key)
+    
     def test_to_rx (self):
         data = Cobalt.Data.Data(self.FIELDS)
         

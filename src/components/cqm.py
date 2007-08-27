@@ -133,9 +133,7 @@ class Job(Cobalt.Data.Data):
         return data
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
-        # I don't think you really want to re-instantiate the AccountingLog?
-        # It's a class attribute, not an object attribute.
+        Cobalt.Data.Data.__setstate__(self, state)
         if not self.timers.has_key('current_queue'):
             self.timers['current_queue'] = Timer()
             self.timers['current_queue'].Start()
