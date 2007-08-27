@@ -90,16 +90,13 @@ class Data(object):
         state = state.copy()
         
         if "_attrib" in state:
-            
-            def update_field (field):
-                if field is "exit-status":
-                    return "exitstatus"
-                return field
-            
             _attrib = state["_attrib"]
-            for field in _attrib:
-                field = update_field(field)
-                state[field] = _attrib[field]
+            
+            for key, value in _attrib.iteritems():
+                if key == "exit-status":
+                    state["exitstatus"] = value
+                else:
+                    state[key] = value
             del state["_attrib"]
         
         self.__dict__ = state
