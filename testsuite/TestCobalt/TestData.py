@@ -61,7 +61,7 @@ class TestData (object):
             required_fields = self.FIELDS.keys()
         
         try:
-            data = NewData({})
+            data = NewData()
         except Cobalt.Data.DataCreationError:
             pass
         else:
@@ -75,7 +75,7 @@ class TestData (object):
     def test_stamp (self):
         # __init__ uses Data.set() to set the stamp, which actually calls
         # time.time() twice: once to set, and another in Data.set()
-        data = Cobalt.Data.Data({})
+        data = Cobalt.Data.Data()
         for key, value in self.FIELDS.items():
             last_stamp = data.get('stamp')
             assert time.time() - last_stamp < 1
@@ -98,14 +98,14 @@ class TestData (object):
             assert data.get(key, value) == value
     
     def test_set (self):
-        data = Cobalt.Data.Data({})
+        data = Cobalt.Data.Data()
         
         for key, value in self.FIELDS.items():
             data.set(key, value)
             assert data.get(key) == value
     
     def test_update (self):
-        data = Cobalt.Data.Data({})
+        data = Cobalt.Data.Data()
         
         data.update(self.FIELDS)
         for key, value in self.FIELDS.items():
@@ -162,7 +162,7 @@ class TestData (object):
             fields.update(dict(
                 self.FIELDS,
             ))
-        data = ExtendedData({})
+        data = ExtendedData()
         rx = data.to_rx()
         for field in self.FIELDS:
             assert field in rx
@@ -207,7 +207,7 @@ class TestData (object):
 class TestForeignData (TestData):
     
     def test_Sync (self):
-        data = Cobalt.Data.ForeignData({})
+        data = Cobalt.Data.ForeignData()
         
         fields = self.FIELDS.copy()
         fields['stamp'] = "a specific value"

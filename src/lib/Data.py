@@ -66,7 +66,7 @@ class Data(object):
     )
     required_fields = []
     
-    def __init__(self, spec):
+    def __init__(self, spec=None):
         
         """Initialize a new Data manager.
         
@@ -77,8 +77,9 @@ class Data(object):
         for field, value in self.fields.iteritems():
             self.set(field, value)
         
-        for field, value in spec.iteritems():
-            self.set(field, value)
+        if spec is not None:
+            for field, value in spec.iteritems():
+                self.set(field, value)
         
         for field in self.required_fields:
             if self.get(field) is None:
