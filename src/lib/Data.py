@@ -90,7 +90,7 @@ class Data(object):
     
     def __setstate__ (self, input_state):
         
-        state = self.__class__.fields.copy()
+        state = self.fields.copy()
         state.update(input_state)
         
         if "_attrib" in state:
