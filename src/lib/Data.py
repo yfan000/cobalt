@@ -75,14 +75,17 @@ class Data(object):
         """
         
         for field, value in self.fields.iteritems():
-            self.set(field, value)
+            setattr(self, field, value)
         
         if spec is not None:
             for field, value in spec.iteritems():
-                self.set(field, value)
+                if field not in self.fields:
+                    warnings.warn("Spec contains undeclared field '%s' on '%s'." % (field, self), RuntimeWarning, stacklevel=2)
+                    self.fields[field] = None
+                setattr(self, field, value)
         
         for field in self.required_fields:
-            if self.get(field) is None:
+            if getattr(self, field) is None:
                 raise DataCreationError, field
         
         self.touch()
@@ -115,7 +118,7 @@ class Data(object):
         field -- The field to get the value of.
         default -- Value to return if field is not set. (default None)
         """
-        warnings.warn("Use of Cobalt.Data.Data.get is deprecated. Use attributes in stead.", DeprecationWarning)
+        warnings.warn("Use of Cobalt.Data.Data.get is deprecated. Use attributes in stead.", DeprecationWarning, stacklevel=2)
         try:
             return getattr(self, field)
         except AttributeError:
@@ -133,9 +136,9 @@ class Data(object):
         field -- The field to set the value of.
         value -- Value to set on the field.
         """
-        warnings.warn("Use of Cobalt.Data.Data.set is deprecated. Use attributes in stead.", DeprecationWarning)
+        warnings.warn("Use of Cobalt.Data.Data.set is deprecated. Use attributes in stead.", DeprecationWarning, stacklevel=2)
         if field not in self.fields:
-            warnings.warn("Creating a new field with set.", RuntimeWarning)
+            warnings.warn("Creating new field '%s' on '%s' with set." % (field, self), RuntimeWarning, stacklevel=2)
             self.fields[field] = None
         setattr(self, field, value)
 
@@ -167,7 +170,7 @@ class Data(object):
         """
         if fields is None:
             fields = self.fields.keys()
-        return dict([(field, self.get(field)) for field in fields])
+        return dict([(field, getattr(self, field)) for field in fields])
 
 
 class DataSet(object):
