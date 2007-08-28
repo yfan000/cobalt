@@ -411,5 +411,52 @@ class TestDataSet (object):
 
 class TestForeignDataSet (TestDataSet):
     
+    def setup (self):
+        class ExtendedData (Cobalt.Data.Data):
+            fields = Cobalt.Data.Data.fields.copy()
+            fields.update(dict(
+                id = None,
+                attribute = 1,
+            ))
+            required_fields = ["id"]
+        
+        class ExtendedDataSet (Cobalt.Data.DataSet):
+            __object__ = ExtendedData
+        
+        self.dataset = ExtendedDataSet()
+        
+        class ExtendedForeignData (Cobalt.Data.ForeignData):
+            fields = Cobalt.Data.ForeignData.fields.copy()
+            fields.update(dict(
+                id = None,
+                attribute = 1,
+            ))
+        
+        def sync (cdata):
+            return self.dataset.Get(cdata)
+        
+        class ExtendedForeignDataSet (Cobalt.Data.ForeignDataSet):
+            __object__ = ExtendedForeignData
+            __fields__ = ["id", "attribute"]
+            __function__ = staticmethod(sync)
+            __unique__ = "id"
+        
+        self.foreigndataset = ExtendedForeignDataSet()
+    
     def test_Sync (self):
-        assert not "I don't want to write tests for this until we refactor component."
+        assert not self.dataset.data
+        self.dataset.Add([{'id':1}])
+        assert self.dataset.data[-1].id == 1
+        
+        assert not self.foreigndataset.data
+        self.foreigndataset.Sync()
+        assert self.foreigndataset.data[-1].id == 1
+        assert self.foreigndataset.data[-1].attribute == 1
+        
+        self.dataset.data[-1].attribute = 2
+        self.foreigndataset.Sync()
+        assert self.foreigndataset.data[-1].attribute == 2
+        
+        self.dataset.remove(self.dataset.data[-1])
+        self.foreigndataset.Sync()
+        assert not self.foreigndataset.data
