@@ -20,6 +20,20 @@ class ProcessGroupCreationError(Exception):
     '''ProcessGroupCreation Error is used when not enough information is specified'''
     pass
 
+class Partition (Cobalt.Data.Data):
+    fields = Cobalt.Data.Data.fields.copy()
+    fields.update(dict(
+        scheduled = False,
+        name = None,
+        functional = False,
+        queue = "default",
+        state = "idle",
+        size = None,
+    ))
+
+class PartitionSet (Cobalt.Data.DataSet):
+    __object__ = Partition
+
 class Brooklyn(Cobalt.Component.Component):
     '''Brooklyn is a bgl bridge simulator'''
     __implementation__ = 'brooklyn'
@@ -29,7 +43,7 @@ class Brooklyn(Cobalt.Component.Component):
         Cobalt.Component.Component.__init__(self, setup)
         self.log = logger
         self.partitions = {}        #dictionary of part:(parents, children, sizes, nodecards)
-        self.partitioninfo = Cobalt.Data.DataSet()
+        self.partitioninfo = PartitionSet()
         self.nodecards = set()      #set of nodecard names
         self.nodecardinfo = {}      #nested dictionary for nodecard info
         self.readConfigFile(setup.get('partconfig'))
