@@ -107,10 +107,8 @@ class Data(object):
             _attrib = state["_attrib"]
             
             for key, value in _attrib.iteritems():
-                if key == "exit-status":
-                    state["exitstatus"] = value
-                else:
-                    state[key] = value
+                key = key.replace("-", "_")
+                state[key] = value
             del state["_attrib"]
         
         self.__dict__ = state
