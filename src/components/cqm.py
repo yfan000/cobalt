@@ -69,7 +69,7 @@ class Job(Cobalt.Data.Data):
         outputdir = None,
         project = None,
         lienID = None,
-        exitstatus = None,
+        exit_status = None,
         stagein = None,
         stageout = None,
         reservation = None,
@@ -86,6 +86,7 @@ class Job(Cobalt.Data.Data):
         self.timers = dict(
             queue = Timer(),
             current_queue = Timer(),
+            user = Timer(),
         )
         self.timers['queue'].Start()
         self.timers['current_queue'].Start()
@@ -339,9 +340,9 @@ class Job(Cobalt.Data.Data):
         if self.spgid.has_key('user'):
             try:
                 #pgroups = self.comms['pm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'output':'*', 'error':'*'}])
-                result = self.comms['pm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit-status':'*'}])
+                result = self.comms['pm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit_status':'*'}])
                 if result:
-                    self.exitstatus = result[0].get('exit-status')
+                    self.exit_status = result[0].get('exit_status')
                 #this seems needed to get the info back into the object so it can be handed back to the filestager.
                 #self.output = pgroups[0]['output']
                 #self.error = pgroups[0]['error']
@@ -673,7 +674,7 @@ class BGJob(Job):
         path = None,
         mode = "co",
         envs = None,
-        exitstatus = None,
+        exit_status = None,
     ))
     
     _configfields = ['bgkernel']
@@ -716,7 +717,7 @@ class BGJob(Job):
             current = os.readlink('%s/%s' % (self.config.get('partitionboot'), self.location))
         except OSError:
             logger.error("Failed to read partitionboot location %s/%s" % (self.config.get('partitionboot'), self.location))
-            logger.info("Job %s/%s using kernel %s" % (self.jobid, self.user))
+            logger.info("Job %s/%s using kernel %s" % (self.jobid, self.user, self.kernel))
             self.acctlog.LogMessage("Job %s/%s using kernel %s" % (self.jobid, self.user, 'N/A'))
             return
         switched = current.split('/')[-1]
@@ -796,10 +797,10 @@ class BGJob(Job):
 
     def LogFinish(self):
         '''Log end of job data, specific for BG/L exit status'''
-        exitstatus = self.exitstatus
+        exit_status = self.exit_status
         try:
-            exitstatus = exitstatus.get('BG/L')
-            exitstatus = int(exitstatus)/256
+            exit_status = exit_status.get('BG/L')
+            exit_status = int(exit_status)/256
         except:
             pass
         logger.info("Job %s/%s on %s nodes done. %s" % \
@@ -808,7 +809,7 @@ class BGJob(Job):
         self.acctlog.LogMessage("Job %s/%s on %s nodes done. %s exit:%s" % \
                                 (self.jobid, self.user,
                                  self.nodes, self.GetStats(),
-                                 str(exitstatus)))
+                                 str(exit_status)))
         self.LogFinishPBS()
     
     def Finish(self):
