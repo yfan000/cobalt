@@ -78,14 +78,10 @@ class Data(object):
             setattr(self, field, value)
         
         if spec is not None:
-            for field, value in spec.iteritems():
-                if field not in self.fields:
-                    warnings.warn("Spec contains undeclared field '%s' on '%s'." % (field, self), RuntimeWarning, stacklevel=2)
-                    self.fields[field] = None
-                setattr(self, field, value)
+            self.update(spec)
         
         for field in self.required_fields:
-            if getattr(self, field) is None:
+            if getattr(self, field, None) is None:
                 raise DataCreationError, field
         
         self.touch()
@@ -119,10 +115,7 @@ class Data(object):
         default -- Value to return if field is not set. (default None)
         """
         warnings.warn("Use of Cobalt.Data.Data.get is deprecated. Use attributes in stead.", DeprecationWarning, stacklevel=2)
-        try:
-            return getattr(self, field)
-        except AttributeError:
-            return default
+        return getattr(self, field, default)
     
     def __setattr__ (self, name, value):
         object.__setattr__(self, name, value)
@@ -149,7 +142,10 @@ class Data(object):
         spec -- A dictionary specifying the values of fields to set.
         """
         for key, value in spec.iteritems():
-            self.set(key, value)
+            if key not in self.fields:
+                warnings.warn("Creating new field '%s' on '%s' with update." % (field, self), RuntimeWarning, stacklevel=2)
+                self.fields[field] = None
+            setattr(self, key, value)
             
     def match(self, spec):
         """True if every field in spec == the same field on the entity.
@@ -158,7 +154,7 @@ class Data(object):
         spec -- Dictionary specifying fields and values to match against.
         """
         for field, value in spec.iteritems():
-            if value != "*" and self.get(field) != value:
+            if not (value == "*" or (hasattr(self, field) and getattr(self, field) == value)):
                 return False
         return True
     
@@ -170,7 +166,7 @@ class Data(object):
         """
         if fields is None:
             fields = self.fields.keys()
-        return dict([(field, getattr(self, field)) for field in fields])
+        return dict([(field, getattr(self, field, None)) for field in fields])
 
 
 class DataSet(object):
@@ -182,7 +178,7 @@ class DataSet(object):
     def keys (self):
         if not self.__unique__:
             raise KeyError("No unique key is set.")
-        return [item.get(self.__unique__) for item in self.data]
+        return [getattr(item, self.__unique__) for item in self.data]
 
     def __init__(self):
         self.data = []
@@ -194,7 +190,7 @@ class DataSet(object):
         if not self.__unique__:
             raise KeyError("No unique key is set.")
         for item in self:
-            if item.get(self.__unique__) == key:
+            if getattr(item, self.__unique__) == key:
                 return item
         raise KeyError(key)
     
@@ -203,8 +199,8 @@ class DataSet(object):
 
     def append(self, item):
         '''add a new element to the set'''
-        if self.__unique__ and item.get(self.__unique__) in self.keys():
-            raise KeyError("duplicate: %s" % item.get(self.__unique__))
+        if self.__unique__ and getattr(item, self.__unique__) in self.keys():
+            raise KeyError("duplicate: %s" % getattr(item, self.__unique__))
         self.data.append(item)
 
     def remove(self, x):
@@ -318,19 +314,20 @@ class ForeignDataSet(DataSet):
             return
         self.__oserror__.Pass()
         
-        local_ids = [item.get(self.__unique__) for item in self]
-        foreign_ids = [item_dict.get(self.__unique__) for item_dict in foreign_data]
+        local_ids = [getattr(item, self.__unique__) for item in self]
+        foreign_ids = [item_dict[self.__unique__] for item_dict in foreign_data]
         
         # sync removed items
         for item in self:
-            if item.get(self.__unique__) not in foreign_ids:
+            if getattr(item, self.__unique__) not in foreign_ids:
                 self.remove(item)
         
         # sync new items
         for item_dict in foreign_data:
-            if item_dict.get(self.__unique__) not in local_ids:
+            if item_dict[self.__unique__] not in local_ids:
                 self.Add(item_dict)
         
         # sync all items
         for item_dict in foreign_data:
-            self[item_dict.get(self.__unique__)].Sync(item_dict)
+            item_id = item_dict[self.__unique__]
+            self[item_id].Sync(item_dict)
