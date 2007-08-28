@@ -77,10 +77,10 @@ class TestData (object):
         # time.time() twice: once to set, and another in Data.set()
         data = Cobalt.Data.Data()
         for key, value in self.FIELDS.items():
-            last_stamp = data.get('stamp')
+            last_stamp = data.stamp
             assert time.time() - last_stamp < 1
-            data.set(key, value)
-            assert data.get('stamp') > last_stamp
+            setattr(data, key, value)
+            assert data.stamp > last_stamp
     
     def test_get (self):
         data = Cobalt.Data.Data(self.FIELDS)
@@ -102,14 +102,14 @@ class TestData (object):
         
         for key, value in self.FIELDS.items():
             data.set(key, value)
-            assert data.get(key) == value
+            assert getattr(data, key) == value
     
     def test_update (self):
         data = Cobalt.Data.Data()
         
         data.update(self.FIELDS)
         for key, value in self.FIELDS.items():
-            assert data.get(key) == value
+            assert getattr(data, key) == value
     
     def test_match (self):
         data = Cobalt.Data.Data(self.FIELDS)
@@ -235,7 +235,7 @@ class TestForeignData (TestData):
         data.Sync(fields)
         for key, value in self.FIELDS.items():
             if key != "stamp":
-                assert data.get(key) == value
+                assert getattr(data, key) == value
         assert data.stamp == fields['stamp']
 
 
