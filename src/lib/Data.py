@@ -306,7 +306,7 @@ class ForeignDataSet(DataSet):
         spec = dict([(field, "*") for field in self.__fields__])
         try:
             foreign_data = self.__function__([spec])
-        except xmlrpclib.Fault:
+        except Exception:
             self.__oserror__.Fail()
             return
         except:
