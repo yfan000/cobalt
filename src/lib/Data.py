@@ -55,9 +55,21 @@ class Data(object):
     
     """A Cobalt entity manager.
     
+    Setting a field attribute on a data updates the timestamp automatically.
+    
     Class attributes:
-    fields -- Public fields for the entity.
+    fields -- Public data fields for the entity.
     required_fields -- Fields that must be specified at initialization.
+    
+    Fields:
+    tag -- Misc. label.
+    stamp -- Timestamp of last field change (or last touch call).
+    
+    Methods:
+    touch -- Update timestamp 'stamp'.
+    update -- Set the value of multiple fields at once.
+    match -- Test that a spec identifies a data.
+    to_rx -- Convert a data to an explicit spec.
     """
     
     fields = dict(
@@ -108,7 +120,7 @@ class Data(object):
         self.stamp = time.time()
     
     def get(self, field, default=None):
-        """Get the value of field from the entity.
+        """(deprecated) Get the value of field from the entity.
         
         Arguments:
         field -- The field to get the value of.
@@ -118,12 +130,12 @@ class Data(object):
         return getattr(self, field, default)
     
     def __setattr__ (self, name, value):
-        object.__setattr__(self, name, value)
-        if name != "stamp":
+        if name in self.fields:
             object.__setattr__(self, "stamp", time.time())
+        object.__setattr__(self, name, value)
 
     def set(self, field, value):
-        """Set the value of field on the entity.
+        """(deprecated) Set the value of field on the entity.
         
         Arguments:
         field -- The field to set the value of.
@@ -143,8 +155,8 @@ class Data(object):
         """
         for key, value in spec.iteritems():
             if key not in self.fields:
-                warnings.warn("Creating new field '%s' on '%s' with update." % (field, self), RuntimeWarning, stacklevel=2)
-                self.fields[field] = None
+                warnings.warn("Creating new field '%s' on '%s' with update." % (key, self), RuntimeWarning, stacklevel=2)
+                self.fields[key] = None
             setattr(self, key, value)
             
     def match(self, spec):
@@ -170,7 +182,27 @@ class Data(object):
 
 
 class DataSet(object):
-    '''DataSet provides storage, iteration, and matching across sets of Data instances'''
+    """A collection of datas.
+    
+    Class attributes:
+    __object__ -- The class used to construct new data instances.
+    __id__ --
+    __unique__ -- Data field to use as a unique identity. (like a primary key)
+    
+    A dataset behaves primarily like a list, providing iteration over the items
+    in the set. However, set[key] access is available when __unique__ is set.
+    
+    Methods:
+    keys -- The unique keys present in the collection.
+    append -- Add an item to the set.
+    remove -- Remove an item from the set.
+    
+    Strange methods:
+    Add -- Create new items in the set from a spec (or list of specs).
+    Get -- Return explicit specs that represent items in the set that match a spec (or list of specs).
+    Del -- Remove items from the set that match a spec (or list of specs).
+    Match -- Return items from the set that match a single spec.
+    """
     __object__ = Data
     __id__ = None
     __unique__ = None
@@ -277,7 +309,7 @@ class DataSet(object):
         return retval
 
     def Match(self, spec):
-        return [item for item in self.data if item.match(spec)]
+        return [item for item in self if item.match(spec)]
 
 
 class ForeignData(Data):
