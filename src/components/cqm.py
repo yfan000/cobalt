@@ -83,7 +83,15 @@ class Job(Cobalt.Data.Data):
     ))
 
     def __init__(self, data, jobid):
+        self.timers = dict(
+            queue = Timer(),
+            current_queue = Timer(),
+        )
+        self.timers['queue'].Start()
+        self.timers['current_queue'].Start()
+        
         Cobalt.Data.Data.__init__(self, data)
+        
         self.comms = Cobalt.Proxy.CommDict()
         if self.jobid is None or self.jobid == '*':
             self.jobid = str(jobid)
@@ -91,13 +99,6 @@ class Job(Cobalt.Data.Data):
             self.submittime = time.time()
         self.staged = 0
         self.killed = False
-        self.timers = {}
-        self.timers['queue'] = Timer()
-        self.timers['current_queue'] = Timer()
-        self.timers['queue'].Start()
-        #self.timers['/usr/sbin/prologue'] = Timer()
-        self.timers['user'] = Timer()
-        #self.timers['/usr/sbin/epilogue'] = Timer()
         self.pgid = {}
         self.spgid = {}
         #self.steps = ['StageInit', 'FinishStage', 'RunPrologue', 'RunUserJob', 'RunEpilogue', 'FinishUserPgrp', 'FinalizeStage', 'Finish']
@@ -121,7 +122,7 @@ class Job(Cobalt.Data.Data):
             if value == "hold":
                 self.timers['hold'] = Timer()
                 self.timers['hold'].Start()
-            elif self.state == "hold":
+            elif getattr(self, "state", None) == "hold":
                 self.timers['hold'].Stop()
         return Cobalt.Data.Data.__setattr__(self, name, value)
     
@@ -703,7 +704,7 @@ class BGJob(Job):
             self.steps = ['NotifyAtStart', 'RunBGUserJob', 'NotifyAtEnd', 'FinishUserPgrp', 'Finish']
         else:
             self.steps = ['RunBGUserJob', 'FinishUserPgrp', 'Finish']
-        if self.config.bgkernel:
+        if self.config.get('bgkernel'):
             self.steps.insert(0, 'SetBGKernel')
         self.SetPassive()
 #         self.acctlog.LogMessage('Q;%s;%s;%s' % \
@@ -1036,6 +1037,7 @@ class Queue(Cobalt.Data.Data, JobSet):
         state = "stopped",
         adminemail = "*",
         policy = "default",
+        maxuserjobs = None,
     ))
     
     def __init__(self, info, _=None):
@@ -1065,6 +1067,8 @@ class QueueSet(Cobalt.Data.DataSet):
     '''Set of queues
     self.data is the list of queues known'''
     __object__ = Queue
+    
+    __unique__ = "name"
 
     def __init__(self):
         Cobalt.Data.DataSet.__init__(self)
@@ -1202,13 +1206,13 @@ class QueueSet(Cobalt.Data.DataSet):
         for Q in self.data:
             Q.Del([data])
             
-    def CanQueue(self, _, job):
+    def CanQueue(self, _, jobspec):
         '''Check that job meets criteria of the specified queue'''
         # if queue doesn't exist, don't check other restrictions
-        if job.queue not in [q.name for q in self.data]:
-            raise xmlrpclib.Fault(30, "Queue '%s' does not exist" % job.queue)
+        if jobspec['queue'] not in [q.name for q in self.data]:
+            raise xmlrpclib.Fault(30, "Queue '%s' does not exist" % jobspec['queue'])
 
-        [testqueue] = [q for q in self.data if q.name == job.queue]
+        [testqueue] = [q for q in self.data if q.name == jobspec['queue']]
 
         # check if queue is dead or draining
         if testqueue.state in ['draining', 'dead']:
@@ -1310,11 +1314,11 @@ class CQM(Cobalt.Component.Component):
         #Job.acctlog.ChangeLog()
         return 1
 
-    def handle_job_add(self, _, data):
+    def handle_job_add(self, _, jobspec):
         '''Add a job, throws in adminemail'''
-        [thequeue] = [q for q in self.Queues if q.name == data.queue]
-        data.update({'adminemail':thequeue.adminemail})
-        response = thequeue.Add(data)
+        [queue] = [q for q in self.Queues if q.name == jobspec['queue']]
+        jobspec.update({'adminemail':queue.adminemail})
+        response = queue.Add(jobspec)
         return response
 
     def handle_job_del(self, _, data, force=False, user=None):
@@ -1341,19 +1345,20 @@ class CQM(Cobalt.Component.Component):
                 )
         return ret
 
-    def handle_queue_del(self, _, data, force=False):
+    def handle_queue_del(self, _, cdata, force=False):
         '''Delete queue(s), but check if there are still jobs in the queue'''
         if force:
-            return self.Queues.Del(data)
-
+            return self.Queues.Del(cdata)
+        
+        queues = [self.Queues[spec["name"]] for spec in self.Queues.Get(cdata)]
+        
         failed = []
-        queues = self.Queues.Get(data)
         for queue in queues[:]:
-            jobs = [j for q in self.Queues for j in q if q.name == queue.name]
+            jobs = list(iter(queues))
             if len(jobs) > 0:
                 failed.append(queue.name)
                 queues.remove(queue)
-        response = self.Queues.Del(queues)
+        response = self.Queues.Del([queue.to_rx() for queue in queues])
         if failed:
             raise xmlrpclib.Fault(31, "The %s queue(s) contains jobs. Either move the jobs to another queue, or \nuse 'cqadm -f --delq' to delete the queue(s) and the jobs.\n\nDeleted Queues\n================\n%s" % (",".join(failed), "\n".join([q.name for q in response])))
         else:
