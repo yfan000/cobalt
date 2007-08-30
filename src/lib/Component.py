@@ -1,6 +1,94 @@
 '''Cobalt component base classes'''
 __revision__ = '$Revision$'
 
+__all__ = ["SSLTCPServer", "XMLRPCServer"]
+
+import sys
+import os
+import SocketServer
+import OpenSSL
+import SimpleXMLRPCServer
+
+
+class SSLTCPServer (SocketServer.TCPServer):
+    
+    """SSL-Encrypted TCP-Server."""
+    
+    def __init__ (self, server_address, RequestHandlerClass, keyfile, certfile=None):
+        """Initialize the SSL-TCP server.
+        
+        Arguments:
+        server_address -- address to bind to the server
+        RequestHandlerClass -- class to handle requests
+        keyfile -- private encryption key filename
+        certfile -- certificate file (optional: defaults to keyfile)
+        """
+        SocketServer.TCPServer.__init__(self, server_address, RequestHandlerClass)
+        # build an SSL context
+        context = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
+        context.use_privatekey_file (keyfile)
+        context.use_certificate_file(certfile or keyfile)
+        # wrap the server socket in an SSL connection
+        self.socket = OpenSSL.SSL.Connection(context, self.socket)
+
+
+class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
+    
+    """Component XMLRPCServer."""
+    
+    def __init__ (self, server_address, keyfile, certfile=None,
+                  requestHandler=SimpleXMLRPCServer.SimpleXMLRPCRequestHandler,
+                  logRequests=False):
+        """Initialize the XML-RPC server.
+        
+        Arguments:
+        server_address -- address to bind to the server
+        keyfile -- private encryption key filename
+        certfile -- certificate file (optional: defaults to keyfile)
+        
+        Keyword arguments:
+        requestHandler -- request handler used by TCP server
+        logRequests -- log all requests (default False)
+        """
+        SimpleXMLRPCDispatcher.__init__(self)
+        SSLTCPServer.__init__(self,
+            server_address, requestHandler, keyfile, certfile or keyfile)
+        self.logRequests = logRequests
+    
+    def serve_daemon (self, stdout=None, stderr=None):
+        """Implement serve_forever inside a daemon.
+        
+        Keyword arguments:
+        stdout -- file to use as stdout for the daemon
+        stderr -- file to use as stderr for the daemon
+        """
+        child_pid = os.fork()
+        if child_pid != 0:
+            return
+        
+        os.setsid() # create a new session
+        
+        child_pid = os.fork()
+        if child_pid != 0:
+            sys._exit(0)
+        
+        sys.stdout = file(stdout or os.devnull, "w")
+        sys.stderr = file(stderr or os.devnull, "w")
+        print >> sys.stderr, "pid: %i" % os.getpid()
+        sys.stderr.flush()
+        self.serve_forever()
+        sys.exit(0)
+
+
+class Component (object):
+    name = "component"
+    implementation = "generic"
+    async = []
+
+
+# -- abandon all hope, ye who read past this line --
+
+
 import atexit, gc, logging, os, select, signal, socket, sys, time, urlparse, xmlrpclib, cPickle, ConfigParser
 import BaseHTTPServer, Cobalt.Proxy, OpenSSL.SSL, SimpleXMLRPCServer, SocketServer
 
@@ -9,7 +97,7 @@ log = logging.getLogger('Component')
 def daemonize(filename):
     '''Do the double fork/setsession dance'''
     # Fork once
-    if os.fork() != 0:      
+    if os.fork() != 0:
         os._exit(0)         
     os.setsid()                     # Create new session
     pid = os.fork()
