@@ -47,7 +47,7 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
     credentials = dict()
     
     def authenticate (self):
-        """Assure that the most recent connection can be authenticated."""
+        """Authenticate the credentials of the latest client."""
         try:
             header = self.headers['Authentication']
         except KeyError:
@@ -120,26 +120,33 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     credentials = property(_get_credentials, _set_credentials)
         
     
-    def serve_daemon (self):
+    def serve_daemon (self, stdout=None, stderr=None):
+        
         """Implement serve_forever inside a daemon.
         
         Keyword arguments:
         stdout -- file to use as stdout for the daemon
         stderr -- file to use as stderr for the daemon
         """
+        
         child_pid = os.fork()
         if child_pid != 0:
             return
         
-        os.setsid() # create a new session
+        os.setsid()
         
         child_pid = os.fork()
         if child_pid != 0:
-            sys._exit(0)
+            os._exit(0)
         
+        sys.stdout = file(stdout or os.devnull, "w")
+        sys.stderr = file(stderr or os.devnull, "w")
+        
+        print >> sys.stderr, os.getpid()
         sys.stderr.flush()
+        
         self.serve_forever()
-        sys.exit(0)
+        os._exit(0)
 
 
 class Component (object):
