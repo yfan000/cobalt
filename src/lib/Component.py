@@ -55,7 +55,7 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
             server_address, requestHandler, keyfile, certfile or keyfile)
         self.logRequests = logRequests
     
-    def serve_daemon (self, stdout=None, stderr=None):
+    def serve_daemon (self):
         """Implement serve_forever inside a daemon.
         
         Keyword arguments:
@@ -72,9 +72,6 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         if child_pid != 0:
             sys._exit(0)
         
-        sys.stdout = file(stdout or os.devnull, "w")
-        sys.stderr = file(stderr or os.devnull, "w")
-        print >> sys.stderr, "pid: %i" % os.getpid()
         sys.stderr.flush()
         self.serve_forever()
         sys.exit(0)
