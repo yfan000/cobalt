@@ -8,11 +8,12 @@ import os
 import SocketServer
 import OpenSSL
 import SimpleXMLRPCServer
+import base64
 
 
 class SSLTCPServer (SocketServer.TCPServer):
     
-    """SSL-Encrypted TCP-Server."""
+    """SSL-Encrypted TCP server."""
     
     def __init__ (self, server_address, RequestHandlerClass, keyfile, certfile=None):
         """Initialize the SSL-TCP server.
@@ -32,13 +33,60 @@ class SSLTCPServer (SocketServer.TCPServer):
         self.socket = OpenSSL.SSL.Connection(context, self.socket)
 
 
+class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
+    
+    """Component XML-RPC request handler.
+    
+    Adds support for HTTP authentication.
+    """
+    
+    class CouldNotAuthenticate (Exception):
+        """Client did not present acceptible authentication information."""
+    
+    require_auth = False
+    credentials = dict()
+    
+    def authenticate (self):
+        """Assure that the most recent connection can be authenticated."""
+        try:
+            header = self.headers['Authentication']
+        except KeyError:
+            raise self.CouldNotAuthenticate("client did not present credentials")
+        auth_type, auth_content = header.split()
+        auth_content = base64.standard_b64decode(auth_content)
+        username, password = auth_content.split(":")
+        try:
+            valid_password == self.credentials[username]
+        except KeyError:
+            raise self.CouldNotAuthenticate("unknown user: %s" % username)
+        if password != valid_password:
+            raise self.CouldNotAuthenticate("invalid password for %s" % username)
+    
+    def handle_one_request (self, *args, **kwargs):
+        """Optionally check HTTP authentication before handle_request."""
+        if self.require_auth:
+            try:
+                self.authenticate()
+            except self.CouldNotAuthenticate:
+                code = 401
+                message, explanation = self.responses[401]
+                self.send_error(code, message)
+                return
+        SimpleXMLRPCServer.SimpleXMLRPCRequestHandler.handle_one_request(*args, **kwargs)
+
+
 class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     
-    """Component XMLRPCServer."""
+    """Component XMLRPCServer.
+    
+    Provides passthrough access to HTTP authentication on request handler.
+    """
+    
+    class XMLRPCRequestHandler (XMLRPCRequestHandler):
+        """Subclassed to separate authentication info."""
     
     def __init__ (self, server_address, keyfile, certfile=None,
-                  requestHandler=SimpleXMLRPCServer.SimpleXMLRPCRequestHandler,
-                  logRequests=False):
+                  requestHandler=XMLRPCRequestHandler, logRequests=False):
         """Initialize the XML-RPC server.
         
         Arguments:
@@ -54,6 +102,23 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         SSLTCPServer.__init__(self,
             server_address, requestHandler, keyfile, certfile or keyfile)
         self.logRequests = logRequests
+    
+    def _get_require_auth (self):
+        return getattr(self.RequestHandlerClass, "require_auth", False)
+    
+    def _set_require_auth (self, value):
+        self.RequestHandlerClass.require_auth = value
+    
+    require_auth = property(_get_require_auth, _set_require_auth)
+    
+    def _get_credentials (self, dummy={}):
+        return getattr(self.RequestHandlerClass, "credentials", dummy)
+    
+    def _set_credentials (self, value):
+        self.RequestHandlerClass.credentials = value
+    
+    credentials = property(_get_credentials, _set_credentials)
+        
     
     def serve_daemon (self):
         """Implement serve_forever inside a daemon.
