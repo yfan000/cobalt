@@ -141,6 +141,8 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         
         sys.stdout = file(stdout or os.devnull, "w")
         sys.stderr = file(stderr or os.devnull, "w")
+        os.chdir(os.sep)
+        os.umask(0)
         
         print >> sys.stderr, os.getpid()
         sys.stderr.flush()
