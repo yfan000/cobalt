@@ -138,10 +138,15 @@ class process_manager(ComponentProxy):
     name = 'process-manager'
     methods = ['CreateProcessGroup', 'GetProcessGroup', 'KillProcessGroup', 'WaitProcessGroup']
 
+class script_manager(ComponentProxy):
+    '''process manager specific component proxy'''
+    name = 'script-manager'
+    methods = ['CreateProcessGroup', 'GetProcessGroup', 'KillProcessGroup', 'WaitProcessGroup']
+
 class queue_manager(ComponentProxy):
     '''queue manager proxy'''
     name = 'queue-manager'
-    methods = ['AddJob', 'GetJobs', 'DelJobs', 'RunJobs', 'SetJobs', 'GetJobID', 'SetJobID', 'AddQueue', 'GetQueues', 'DelQueues', 'SetQueues', 'CanRun', 'CanQueue', 'GetHistory']
+    methods = ['AddJob', 'GetJobs', 'DelJobs', 'RunJobs', 'SetJobs', 'GetJobID', 'SetJobID', 'AddQueue', 'GetQueues', 'DelQueues', 'SetQueues', 'CanRun', 'CanQueue', 'GetHistory', 'ScriptMPI']
 
 class scheduler(ComponentProxy):
     '''scheduler proxy'''
@@ -161,7 +166,7 @@ class simulator(ComponentProxy):
 class CommDict(dict):
     '''CommDict is a dictionary that automatically instantiates a component proxy upon access'''
     commnames = {'pm':process_manager, 'fs':file_stager, 'am':allocation_manager,
-                 'sched':scheduler, 'qm':queue_manager}
+                 'sched':scheduler, 'qm':queue_manager, 'sm':script_manager}
 
     def __getitem__(self, name):
         if not self.has_key(name):

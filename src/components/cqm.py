@@ -1241,6 +1241,8 @@ class CQM(Cobalt.Component.Component):
         self.register_function(self.get_jobid, 'GetJobID')
         self.register_function(self.set_jobid, 'SetJobID')
         self.register_function(self.handle_queue_history, "GetHistory")
+        self.register_function(self.run_script, 'RunScript')
+        self.register_function(self.invoke_mpi_from_script, "ScriptMPI")
 
     def get_jobid(self, _):
         '''Get next jobid'''
@@ -1340,7 +1342,23 @@ class CQM(Cobalt.Component.Component):
                 if pgid not in live:
                     self.logger.info("Found dead pg for job %s" % (job.get('jobid')))
                     job.CompletePG(pgid)
-
+    
+    def run_script(self, execname):
+        '''Ask the script manager to execute a script'''
+        sm = self.comms['sm']
+        
+        sm.CreateProcessGroup({'tag':'process-group', 'user':user, 'pgid':'*', 'executable':execname, 'location':"kwakers", 'jobid':"oo" })
+        
+    def  invoke_mpi_from_script(self, _, data):
+        '''Invoke the real mpirun on behalf of a script being executed by the script manager.'''
+        d = {'tag':'job', 'pgid':'*'}
+        d.update(data)
+        j = BGJob(d, d.get('jobid'))
+        j.RunBGUserJob()
+        
+        return j.pgid['user']
+        
+    
 if __name__ == '__main__':
     from getopt import getopt, GetoptError
     try:
