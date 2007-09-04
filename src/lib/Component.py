@@ -99,7 +99,7 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         requestHandler -- request handler used by TCP server
         logRequests -- log all requests (default False)
         """
-        SimpleXMLRPCDispatcher.__init__(self)
+        SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self)
         SSLTCPServer.__init__(self,
             server_address, requestHandler, keyfile, certfile or keyfile)
         self.logRequests = logRequests
