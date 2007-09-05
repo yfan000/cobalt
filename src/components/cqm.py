@@ -1452,7 +1452,7 @@ class CQM(Cobalt.Component.Component):
         '''Ask the script manager to execute a script'''
         sm = self.comms['sm']
         
-        sm.CreateProcessGroup({'tag':'process-group', 'user':user, 'pgid':'*', 'executable':execname, 'location':"kwakers", 'jobid':"oo" })
+        sm.CreateProcessGroup({'tag':'process-group', 'user':user, 'pgid':'*', 'executable':execname, 'location':"kwakers", 'jobid':"" })
         
     def  invoke_mpi_from_script(self, _, data):
         '''Invoke the real mpirun on behalf of a script being executed by the script manager.'''
