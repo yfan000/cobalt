@@ -836,6 +836,110 @@ class BGJob(Job):
                     logger.info("Job %s/%s: exception with postscript %s, error is %s" %
                                  (self.jobid, self.user, p, e))
 
+class ScriptMPIJob(Job):
+    '''ScriptMPIJob is an mpirun command issued from a user script.'''
+    _configfields = ['bgkernel']
+    _config = ConfigParser.ConfigParser()
+    if '-C' in sys.argv:
+        _config.read(sys.argv[sys.argv.index('-C') + 1])
+    else:
+        _config.read('/etc/cobalt.conf')
+        if not _config._sections.has_key('cqm'):
+            print '''"cqm" section missing from cobalt config file'''
+            raise SystemExit, 1
+    config = _config._sections['cqm']
+    mfields = [field for field in _configfields if not config.has_key(field)]
+    if mfields:
+        print "Missing option(s) in cobalt config file: %s" % (" ".join(mfields))
+        raise SystemExit, 1
+    if config.get('bgkernel') == 'true':
+        for param in ['partitionboot', 'bootprofiles']:
+            if config.get(param, 'nothere') == 'nothere':
+                print "Missing option in cobalt config file: %s." % (param)
+                print "This is required only if dynamic kernel support is enabled"
+                raise SystemExit, 1
+
+    def __init__(self, data, jobid):
+        Job.__init__(self, data, jobid)
+        if not self.get('kernel', False):
+            self.set('kernel', 'default')
+        #AddEvent("queue-manager", "job-submitted", self.get('jobid'))
+        self.SetPassive()
+                
+    def SetBGKernel(self):
+        '''Ensure that the kernel is set properly prior to job launch'''
+        try:
+            current = os.readlink('%s/%s' % (self.config.get('partitionboot'), self.get('location')))
+        except OSError:
+            logger.error("Failed to read partitionboot location %s/%s" % (self.config.get('partitionboot'), self.get('location')))
+            logger.info("Job %s/%s using kernel %s" % (self.get('jobid'), self.get('user'), 'N/A'))
+            self.acctlog.LogMessage("Job %s/%s using kernel %s" % (self.get('jobid'), self.get('user'), 'N/A'))
+            return
+        switched = current.split('/')[-1]
+        if current != "%s/%s" % (self.config.get('bootprofiles'), self.get('kernel')):
+            logger.info("Updating boot image for %s" % (self.get('location')))
+            logger.info("Set to %s should be %s" % (current.split('/')[-1], self.get('kernel')))
+            try:
+                os.unlink('%s/%s' % (self.config.get('partitionboot'), self.get('location')))
+                os.symlink('%s/%s' % (self.config.get('bootprofiles'), self.get('kernel')),
+                           '%s/%s' % (self.config.get('partitionboot'), self.get('location')))
+                switched = self.get('kernel')
+            except OSError:
+                logger.error("Failed to reset boot location for partition for %s" % (self.get('location')))
+
+        logger.info("Job %s/%s using kernel %s" % (self.get('jobid'), self.get('user'), switched))
+        self.acctlog.LogMessage("Job %s/%s using kernel %s" % (self.get('jobid'), self.get('user'), switched))
+
+    def RunScriptMPIJob(self):
+        '''Run an mpirun job that was invoked by a script.'''
+        if self.config.get('bgkernel', 'false') == 'true':
+            SetBGKernel()
+
+        self.set('state', 'running')
+        self.timers['user'].Start()
+        self.LogStart()
+        if not self.get('outputpath', False):
+            self.set('outputpath', "%s/%s.output" % (self.get('outputdir'), self.get('jobid')))
+        if not self.get('errorpath', False):
+            self.set('errorpath', "%s/%s.error" % (self.get('outputdir'), self.get('jobid')))
+
+        try:
+            pgroup = self.comms['pm'].CreateProcessGroup(
+                {'tag':'process-group', 'user':self.get('user'), 'pgid':'*', 'outputfile':self.get('outputpath'),
+                 'errorfile':self.get('errorpath'), 'path':self.get('path'), 'size':self.get('procs'),
+                 'mode':self.get('mode', 'co'), 'cwd':self.get('outputdir'), 'executable':self.get('command'),
+                 'args':self.get('args'), 'envs':self.get('envs', {}), 'location':[self.get('location')],
+                 'jobid':self.get('jobid'), 'inputfile':self.get('inputfile', ''), 'kerneloptions':self.get('kerneloptions', '')})
+        except xmlrpclib.Fault:
+            raise ProcessManagerError
+        except Cobalt.Proxy.CobaltComponentError:
+            raise ProcessManagerError
+        if not pgroup[0].has_key('pgid'):
+            logger.error("Process Group creation failed for Job %s" % self.get('jobid'))
+            self.set('state', 'pm-failure')
+        else:
+            self.pgid['user'] = pgroup[0]['pgid']
+        self.SetPassive()
+        self.LogFinish()
+
+    def LogFinish(self):
+        '''Log end of job data, specific for BG/L exit status'''
+        exitstatus = self.get('exit-status', 'N/A')
+        try:
+            exitstatus = exitstatus.get('BG/L')
+            exitstatus = int(exitstatus)/256
+        except:
+            pass
+        logger.info("Job %s/%s on %s nodes done. %s" % \
+                    (self.get('jobid'), self.get('user'),
+                     self.get('nodes'), self.GetStats()))
+        self.acctlog.LogMessage("Job %s/%s on %s nodes done. %s exit:%s" % \
+                                (self.get('jobid'), self.get('user'),
+                                 self.get('nodes'), self.GetStats(),
+                                 str(exitstatus)))
+        self.LogFinishPBS()
+
+
 class JobSet(Cobalt.Data.DataSet):
     '''Set of currently queued jobs'''
     __object__ = BGJob
@@ -1284,6 +1388,9 @@ class CQM(Cobalt.Component.Component):
         self.register_function(self.get_jobid, 'GetJobID')
         self.register_function(self.set_jobid, 'SetJobID')
         self.register_function(self.handle_queue_history, "GetHistory")
+        self.register_function(self.run_script, 'RunScript')
+        self.register_function(self.invoke_mpi_from_script, "ScriptMPI")
+
 
     def get_jobid(self, _):
         '''Get next jobid'''
@@ -1384,6 +1491,22 @@ class CQM(Cobalt.Component.Component):
                 if pgid not in live:
                     self.logger.info("Found dead pg for job %s" % (job.jobid))
                     job.CompletePG(pgid)
+
+    def run_script(self, execname):
+        '''Ask the script manager to execute a script'''
+        sm = self.comms['sm']
+        
+        sm.CreateProcessGroup({'tag':'process-group', 'user':user, 'pgid':'*', 'executable':execname, 'location':"kwakers", 'jobid':"" })
+        
+    def  invoke_mpi_from_script(self, _, data):
+        '''Invoke the real mpirun on behalf of a script being executed by the script manager.'''
+        d = {'tag':'job', 'pgid':'*'}
+        d.update(data)
+        j = ScriptMPIJob(d, d.get('jobid'))
+        j.RunScriptMPIJob()
+        
+        return j.pgid['user']
+
 
 if __name__ == '__main__':
     from getopt import getopt, GetoptError

@@ -35,10 +35,23 @@ if __name__ == '__main__':
     jobspec = {'jobid':"oo", 'command':execname, 'user':user, 'nodes':'100', 'procs':'100', 'walltime':'1', 'mode':'vn', 'args':'', 'outputdir':'/tmp', 'path':''}
     try:
         cqm = Cobalt.Proxy.queue_manager()
+        pm = Cobalt.Proxy.process_manager()
 
         # try adding job to queue_manager
         pgid = cqm.ScriptMPI(jobspec)
         print "i see pgid of : ", pgid
+        
+        while True:
+            r = pm.GetProcessGroup([{'tag':'process-group', 'pgid':pgid, 'state':'*'}])
+            state = r[0]['state']
+            if state == 'running':
+                time.sleep(5)
+                continue
+            else:
+                break
+        print "process group %s has completed" % (pgid)
+        pm.WaitProcessGroup([{'tag':'process-group', 'pgid':pgid, 'exit-status':'*'}])
+        
 
     except Cobalt.Proxy.CobaltComponentError:
         logger.error("Can't connect to the queue manager")
@@ -61,7 +74,5 @@ if __name__ == '__main__':
 #         logger.error("Error submitting job")
 #         raise SystemExit, 1
 
-    result = "yay!"
-    #result = Cobalt.Proxy.process_manager().WaitProcessGroup([{'tag':'process-group', 'pgid':pgid, 'exit-status':'*'}])
 
-    print "all done with result : %s" % result
+    print "all done!"
