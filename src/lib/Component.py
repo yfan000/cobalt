@@ -1,37 +1,50 @@
 '''Cobalt component base classes'''
 __revision__ = '$Revision$'
 
-__all__ = ["SSLTCPServer", "XMLRPCServer"]
+__all__ = ["TCPServer", "XMLRPCServer"]
 
 import sys
 import os
+import socket
 import SocketServer
 import OpenSSL
 import SimpleXMLRPCServer
 import base64
 import signal
+import inspect
+import cPickle
+
+import Cobalt.Proxy
 
 
-class SSLTCPServer (SocketServer.TCPServer):
+class TCPServer (SocketServer.TCPServer):
     
-    """SSL-Encrypted TCP server."""
+    """TCP server supporting SSL encryption."""
     
-    def __init__ (self, server_address, RequestHandlerClass, keyfile, certfile=None):
+    def __init__ (self, server_address, RequestHandlerClass, keyfile=None, certfile=None):
+        
         """Initialize the SSL-TCP server.
         
         Arguments:
         server_address -- address to bind to the server
         RequestHandlerClass -- class to handle requests
-        keyfile -- private encryption key filename
-        certfile -- certificate file (optional: defaults to keyfile)
+        keyfile -- private encryption key filename (enables ssl encryption)
+        certfile -- certificate file (enables ssl encryption)
         """
+        
         SocketServer.TCPServer.__init__(self, server_address, RequestHandlerClass)
-        # build an SSL context
-        context = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
-        context.use_privatekey_file (keyfile)
-        context.use_certificate_file(certfile or keyfile)
-        # wrap the server socket in an SSL connection
-        self.socket = OpenSSL.SSL.Connection(context, self.socket)
+        
+        # encrypt with ssl
+        if keyfile or certfile:
+            context = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
+            context.use_privatekey_file(keyfile or certfile)
+            context.use_certificate_file(certfile or keyfile)
+            self.socket = OpenSSL.SSL.Connection(context, self.socket)
+    
+    def _get_url (self):
+        address, port = self.socket.getsockname()
+        return "https://%s:%i" % (address, port)
+    url = property(_get_url)
 
 
 class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
@@ -45,7 +58,7 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
         """Client did not present acceptible authentication information."""
     
     require_auth = False
-    credentials = dict()
+    credentials = None
     
     def authenticate (self):
         """Authenticate the credentials of the latest client."""
@@ -73,10 +86,21 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
                 message, explanation = self.responses[401]
                 self.send_error(code, message)
                 return
-        SimpleXMLRPCServer.SimpleXMLRPCRequestHandler.handle_one_request(*args, **kwargs)
+        SimpleXMLRPCServer.SimpleXMLRPCRequestHandler.handle_one_request(self, *args, **kwargs)
+    
+    def setup (self):
+        # Overriding setup to handle pyOpenSSL's lack of support for makefile()
+        self.connection = self.request
+        try:
+            self.rfile = self.connection.makefile('rb', self.rbufsize)
+        except NotImplementedError:
+            self.rfile = socket._fileobject(self.connection, "rb", self.rbufsize)
+            self.wfile = socket._fileobject(self.connection, "wb", self.wbufsize)
+        else:
+            self.wfile = self.connection.makefile('wb', self.wbufsize)
 
 
-class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
+class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     
     """Component XMLRPCServer.
     
@@ -84,10 +108,14 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     """
     
     class XMLRPCRequestHandler (XMLRPCRequestHandler):
-        """Subclassed to separate authentication info."""
+        """Default request handler."""
+        # Subclassing prevents changes in authentication state
+        # from changing the superclass state.
     
     def __init__ (self, server_address, keyfile, certfile=None,
-                  requestHandler=XMLRPCRequestHandler, logRequests=False):
+                  requestHandler=XMLRPCRequestHandler, logRequests=False,
+                  static=False, allow_none=True, encoding=None):
+        
         """Initialize the XML-RPC server.
         
         Arguments:
@@ -98,13 +126,48 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         Keyword arguments:
         requestHandler -- request handler used by TCP server
         logRequests -- log all requests (default False)
+        static -- presence should not be reported to slp
+        allow_none -- allow None values in xml-rpc
+        encoding -- encoding to use for xml-rpc (default UTF-8)
         """
-        SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self)
-        SSLTCPServer.__init__(self,
-            server_address, requestHandler, keyfile, certfile or keyfile)
+        
+        try:
+            SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self, allow_none, encoding)
+        except TypeError:
+            SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self)
+            self.allow_none = allow_none
+            self.encoding = encoding
+        
+        TCPServer.__init__(self,
+            server_address, requestHandler, keyfile, certfile)
         self.logRequests = logRequests
         self.serve = False
+        self.static = static
         self.register_introspection_functions()
+        self.register_function(self.ping)
+    
+    if sys.version_info[0] < 2 or (sys.version_info[0] == 2 and sys.version_info[1] < 5):
+        def _marshaled_dispatch (self, data, dispatch_method=None):
+            __doc__ = SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__doc__
+            try:
+                params, method = xmlrpclib.loads(data)
+                if dispatch_method is not None:
+                    response = dispatch_method(method, params)
+                else:
+                    response = self._dispatch(method, params)
+                response = (response,)
+                response = xmlrpclib.dumps(response, methodresponse=1,
+                    allow_none=self.allow_none, encoding=self.encoding)
+            except Fault, fault:
+                response = xmlrpclib.dumps(fault,
+                    allow_none=self.allow_none, encoding=self.encoding)
+            except:
+                # report exception back to server
+                response = xmlrpclib.dumps(
+                    xmlrpclib.Fault(1, "%s:%s" % (sys.exc_type, sys.exc_value)),
+                    allow_none=self.allow_none, encoding=self.encoding)
+    
+            return response
     
     def _get_require_auth (self):
         return getattr(self.RequestHandlerClass, "require_auth", False)
@@ -117,12 +180,6 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     def _set_credentials (self, value):
         self.RequestHandlerClass.credentials = value
     credentials = property(_get_credentials, _set_credentials)
-    
-    def _get_url (self, value):
-        address = self.socket.getsockname[0]
-        port = self.socket.getsockname[1]
-        return "https://%s:%i" % (address, port)
-    url = property(_get_url)
     
     def serve_daemon (self, stdout=None, stderr=None):
         
@@ -161,24 +218,20 @@ class XMLRPCServer (SSLTCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     def serve_forever (self):
         """Serve single requests until (self.serve == False)."""
         self.serve = True
+        if not self.static:
+            Cobalt.Proxy.Component("slp").register(self.instance.name, self.url)
         while self.serve:
             self.handle_request()
+        if not self.static:
+            Cobalt.Proxy.Component("slp").remove(self.instance.name)
     
     def shutdown (self):
         """Signal that automatic service should stop."""
         self.serve = False
     
-    def report (self, available=True):
-        """Report availability to the SLP.
-        
-        Arguments:
-        available -- True: add the service, False: remove the service
-        """
-        slp = Cobalt.Proxy.ServerProxy("service-locator")
-        if available:
-            return slp.register(self.instance.name, self.url)
-        else:
-            return slp.remove(self.instance.name)
+    def ping (self, *args):
+        """Echo response."""
+        return args
 
 
 class Component (object):
@@ -195,5 +248,60 @@ class Component (object):
     implementation -- implementation identifier (e.g., "BlueGene/L", "BlueGene/P")
     """
     
+    def __init__ (self, statefile=None):
+        self.statefile = statefile
+    
+    def save (self, statefile=None):
+        data = cPickle.dumps(self)
+        statefile = file(statefile or self.statefile, "wb")
+        statefile.write(data)
+    
+    def _dispatch (self, method, args):
+        """Custom XML-RPC dispatcher for components.
+        
+        method -- XML-RPC method name
+        args -- tuple of paramaters to method
+        """
+        try:
+            func = getattr(self, method)
+        except AttributeError:
+            raise Exception('method "%s" is not supported' % method)
+        if not getattr(func, "exposed", False):
+            raise Exception('method "%s" is not supported' % method)
+        return func(*args)
+    
+    def _listMethods (self):
+        """Custom XML-RPC introspective method list."""
+        return [
+            name for name, member in inspect.getmembers(self, callable)
+            if not name.startswith("_")
+            and getattr(member, "exposed", False)
+        ]
+    
     name = "component"
     implementation = "generic"
+
+def expose (func):
+    """Mark a method to be exposed publically.
+    
+    Examples:
+    class MyComponent (Component):
+        @expose
+        def my_method (self, param1, param2):
+            do_stuff()
+    
+    class MyComponent (Component):
+        def my_method (self, param1, param2):
+            do_stuff()
+        my_method = expose(my_method)
+    """
+    func.exposed = True
+    return func
+
+def hide (func):
+    """Remove a method from the public view of a component.
+    
+    Methods are hidden by default.
+    """
+    func.exposed = False
+    return func
