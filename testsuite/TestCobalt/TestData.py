@@ -1,5 +1,6 @@
 import time
 import itertools
+import warnings
 
 import Cobalt.Data
 
@@ -56,6 +57,12 @@ class TestData (object):
         five = 5,
     )
     
+    def setup (self):
+        warnings.resetwarnings()
+    
+    def teardown (self):
+        warnings.resetwarnings()
+    
     def test_required_fields (self):
         class NewData (Cobalt.Data.Data):
             required_fields = self.FIELDS.keys()
@@ -83,11 +90,14 @@ class TestData (object):
             assert data.stamp > last_stamp
     
     def test_get (self):
+        warnings.simplefilter("ignore", DeprecationWarning)
+        warnings.simplefilter("ignore", RuntimeWarning)
         data = Cobalt.Data.Data(self.FIELDS)
         for key, value in self.FIELDS.items():
             assert data.get(key) == value
     
     def test_get_default (self):
+        warnings.simplefilter("ignore", DeprecationWarning)
         data = Cobalt.Data.Data(self.FIELDS)
         
         for key, value, default in zip(self.FIELDS.keys(), self.FIELDS.values(), self.INVALID_FIELDS.values()):
@@ -98,6 +108,7 @@ class TestData (object):
             assert data.get(key, value) == value
     
     def test_set (self):
+        warnings.simplefilter("ignore", DeprecationWarning)
         data = Cobalt.Data.Data()
         
         for key, value in self.FIELDS.items():
@@ -241,7 +252,7 @@ class TestForeignData (TestData):
 
 class TestDataSet (object):
     
-    DATA_FIELDS = TestData.FIELDS
+    DATA_FIELDS = Cobalt.Data.DataSet.__object__.fields
     
     DATA = [
         Cobalt.Data.DataSet.__object__(DATA_FIELDS),
