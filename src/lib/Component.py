@@ -21,7 +21,7 @@ class TCPServer (SocketServer.TCPServer):
     
     """TCP server supporting SSL encryption."""
     
-    def __init__ (self, server_address, RequestHandlerClass, keyfile=None, certfile=None):
+    def __init__ (self, server_address, RequestHandlerClass, timeout=None, keyfile=None, certfile=None):
         
         """Initialize the SSL-TCP server.
         
@@ -40,6 +40,8 @@ class TCPServer (SocketServer.TCPServer):
             context.use_privatekey_file(keyfile or certfile)
             context.use_certificate_file(certfile or keyfile)
             self.socket = OpenSSL.SSL.Connection(context, self.socket)
+        
+        self.socket.settimeout(timeout)
     
     def _get_url (self):
         address, port = self.socket.getsockname()
@@ -112,7 +114,9 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         # Subclassing prevents changes in authentication state
         # from changing the superclass state.
     
-    def __init__ (self, server_address, keyfile, certfile=None,
+    def __init__ (self, server_address,
+                  heartbeat=None,
+                  keyfile=None, certfile=None,
                   requestHandler=XMLRPCRequestHandler, logRequests=False,
                   static=False, allow_none=True, encoding=None):
         
@@ -139,7 +143,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
             self.encoding = encoding
         
         TCPServer.__init__(self,
-            server_address, requestHandler, keyfile, certfile)
+            server_address, requestHandler, timeout=heartbeat, keyfile=keyfile, certfile=certfile)
         self.logRequests = logRequests
         self.serve = False
         self.static = static
@@ -220,8 +224,14 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         self.serve = True
         if not self.static:
             Cobalt.Proxy.Component("slp").register(self.instance.name, self.url)
+        
         while self.serve:
-            self.handle_request()
+            try:
+                self.handle_request()
+            except socket.timeout:
+                pass
+            self.instance.do_tasks()
+        
         if not self.static:
             Cobalt.Proxy.Component("slp").remove(self.instance.name)
     
@@ -248,6 +258,9 @@ class Component (object):
     implementation -- implementation identifier (e.g., "BlueGene/L", "BlueGene/P")
     """
     
+    name = "component"
+    implementation = "generic"
+    
     def __init__ (self, statefile=None):
         self.statefile = statefile
     
@@ -255,6 +268,16 @@ class Component (object):
         data = cPickle.dumps(self)
         statefile = file(statefile or self.statefile, "wb")
         statefile.write(data)
+    
+    def do_tasks (self):
+        """Perform automatic tasks for the component.
+        
+        Automatic tasks are member callables with an attribute
+        automatic == True.
+        """
+        for name, func in inspect.getmembers(self, callable):
+            if getattr(func, "automatic", False):
+                func()
     
     def _dispatch (self, method, args):
         """Custom XML-RPC dispatcher for components.
@@ -273,13 +296,9 @@ class Component (object):
     def _listMethods (self):
         """Custom XML-RPC introspective method list."""
         return [
-            name for name, member in inspect.getmembers(self, callable)
-            if not name.startswith("_")
-            and getattr(member, "exposed", False)
+            name for name, func in inspect.getmembers(self, callable)
+            if getattr(func, "exposed", False)
         ]
-    
-    name = "component"
-    implementation = "generic"
 
 def expose (func):
     """Mark a method to be exposed publically.
@@ -304,4 +323,9 @@ def hide (func):
     Methods are hidden by default.
     """
     func.exposed = False
+    return func
+
+def automate (func):
+    """Mark a method to be run continually."""
+    func.automatic = True
     return func
