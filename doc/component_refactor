@@ -86,5 +86,8 @@ Reimplemented, hopefully while supporting the functionality added.
  * allow 'None' as an XML-RPC value
 Supported with a backport of the Python 2.5 library.
 
- * logging: logger
  * asyncronous methods: get_request, async_funcs
+Callable members of components are called routinely when they have the attribute
+automatic = True.
+
+ * logging: logger
