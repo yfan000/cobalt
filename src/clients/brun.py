@@ -77,9 +77,9 @@ if __name__ == '__main__':
             raise SystemExit, 1
     except:
         print >> sys.stderr, timestamp() + " FE_MPI (Info) : COBALT_JOBID not found, can't determine runtime"
-	print >> sys.stderr, timestamp() + " FE_MPI (Info) : Using first argument of job instead"
-	
-	walltime = int(sys.argv[sys.argv.index('-args') + 1]) * 60
+        print >> sys.stderr, timestamp() + " FE_MPI (Info) : Using first argument of job instead"
+        
+        walltime = int(sys.argv[sys.argv.index('-args') + 1]) * 60
 
         bjobid = 99999  # Why not, indeed
         

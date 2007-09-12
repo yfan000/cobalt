@@ -35,5 +35,10 @@ if __name__ == '__main__':
         print "Failed to connect to script manager"
         raise SystemExit, 1
     
-    sm.CreateProcessGroup({'tag':'process-group', 'user':user, 'pgid':'*', 'executable':execname, 'location':"kwakers", 'jobid':"oo" })
+    pgs = sm.GetProcessGroup([{'tag':'process-group', 'pgid':'*', 'state':'*'}])
+    print pgs
 
+
+#     pgroup = sm.CreateProcessGroup({'tag':'process-group', 'user':user, 'pgid':'*', 'executable':execname, 'location':"kwakers", 'jobid':"oo" })
+# 
+#     print "here's pgroup id " + `pgroup[0]['pgid']`

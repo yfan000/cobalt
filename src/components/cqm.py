@@ -19,6 +19,10 @@ class TimerException(Exception):
     '''This error occurs when timer methods are called in the wrong order'''
     pass
 
+class ScriptManagerError(Exception):
+    '''This error occurs when communications with the script manager fail'''
+    pass
+
 class Timer(object):
     '''The timer object keeps track of elapsed times for jobs'''
     def __init__(self):
@@ -340,7 +344,10 @@ class Job(Cobalt.Data.Data):
         if self.spgid.has_key('user'):
             try:
                 #pgroups = self.comms['pm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'output':'*', 'error':'*'}])
-                result = self.comms['pm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit_status':'*'}])
+                if self.mode == 'script':
+                    result = self.comms['sm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit_status':'*'}])
+                else:
+                    result = self.comms['pm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit_status':'*'}])
                 if result:
                     self.exit_status = result[0].get('exit_status')
                 #this seems needed to get the info back into the object so it can be handed back to the filestager.
@@ -777,22 +784,40 @@ class BGJob(Job):
         if not self.errorpath:
             self.errorpath = "%s/%s.error" % (self.outputdir, self.jobid)
 
-        try:
-            pgroup = self.comms['pm'].CreateProcessGroup(
-                {'tag':'process-group', 'user':self.user, 'pgid':'*', 'outputfile':self.outputpath,
-                 'errorfile':self.errorpath, 'path':self.path, 'size':self.procs,
-                 'mode':self.mode, 'cwd':self.outputdir, 'executable':self.command,
-                 'args':self.args, 'envs':self.envs, 'location':[self.location],
-                 'jobid':self.jobid, 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions})
-        except xmlrpclib.Fault:
-            raise ProcessManagerError
-        except Cobalt.Proxy.CobaltComponentError:
-            raise ProcessManagerError
-        if not pgroup[0].has_key('pgid'):
-            logger.error("Process Group creation failed for Job %s" % self.jobid)
-            self.state = 'pm-failure'
+        if self.mode == 'script':
+            try:
+                pgroup = self.comms['sm'].CreateProcessGroup({'tag':'process-group', 'user':self.user, 'pgid':'*', 'outputfile':self.outputpath,
+                     'errorfile':self.errorpath, 'path':self.path, 'size':self.procs,
+                     'mode':self.mode, 'cwd':self.outputdir, 'executable':self.command,
+                     'args':self.args, 'envs':self.envs, 'location':[self.location],
+                     'jobid':self.jobid, 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions})            
+            except xmlrpclib.Fault:
+                raise ScriptManagerError
+            except Cobalt.Proxy.CobaltComponentError:
+                raise ScriptManagerError
+            if not pgroup[0].has_key('pgid'):
+                logger.error("Process Group creation failed for Job %s" % self.jobid)
+                self.state = 'sm-failure'
+            else:
+                self.pgid['user'] = pgroup[0]['pgid']
         else:
-            self.pgid['user'] = pgroup[0]['pgid']
+            try:
+                pgroup = self.comms['pm'].CreateProcessGroup(
+                    {'tag':'process-group', 'user':self.user, 'pgid':'*', 'outputfile':self.outputpath,
+                     'errorfile':self.errorpath, 'path':self.path, 'size':self.procs,
+                     'mode':self.mode, 'cwd':self.outputdir, 'executable':self.command,
+                     'args':self.args, 'envs':self.envs, 'location':[self.location],
+                     'jobid':self.jobid, 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions})
+            except xmlrpclib.Fault:
+                raise ProcessManagerError
+            except Cobalt.Proxy.CobaltComponentError:
+                raise ProcessManagerError
+            if not pgroup[0].has_key('pgid'):
+                logger.error("Process Group creation failed for Job %s" % self.jobid)
+                self.state = 'pm-failure'
+            else:
+                self.pgid['user'] = pgroup[0]['pgid']
+            
         self.SetPassive()
 
     def LogFinish(self):
@@ -906,17 +931,15 @@ class ScriptMPIJob(Job):
         try:
             pgroup = self.comms['pm'].CreateProcessGroup(
                 {'tag':'process-group', 'user':self.get('user'), 'pgid':'*', 'outputfile':self.get('outputpath'),
-                 'errorfile':self.get('errorpath'), 'path':self.get('path'), 'size':self.get('procs'),
-                 'mode':self.get('mode', 'co'), 'cwd':self.get('outputdir'), 'executable':self.get('command'),
-                 'args':self.get('args'), 'envs':self.get('envs', {}), 'location':[self.get('location')],
-                 'jobid':self.get('jobid'), 'inputfile':self.get('inputfile', ''), 'kerneloptions':self.get('kerneloptions', '')})
+                 'errorfile':self.get('errorpath'), 'path':self.get('path'), 'cwd':self.get('outputdir'), 'location':[self.get('location')],
+                 'jobid':self.get('jobid'), 'inputfile':self.get('inputfile', ''), 'true_mpi_args':self.get('true_mpi_args'), 'envs':{}})
         except xmlrpclib.Fault:
-            raise ProcessManagerError
+            raise ScriptManagerError
         except Cobalt.Proxy.CobaltComponentError:
-            raise ProcessManagerError
+            raise ScriptManagerError
         if not pgroup[0].has_key('pgid'):
             logger.error("Process Group creation failed for Job %s" % self.get('jobid'))
-            self.set('state', 'pm-failure')
+            self.set('state', 'sm-failure')
         else:
             self.pgid['user'] = pgroup[0]['pgid']
         self.SetPassive()
@@ -1356,7 +1379,7 @@ class CQM(Cobalt.Component.Component):
     __implementation__ = 'cqm'
     __name__ = 'queue-manager'
     __statefields__ = ['Queues']
-    async_funcs = ['assert_location', 'progress', 'pm_sync']
+    async_funcs = ['assert_location', 'progress', 'pm_sync', 'sm_sync']
 
     def __init__(self, setup):
         self.Queues = QueueSet()
@@ -1388,7 +1411,6 @@ class CQM(Cobalt.Component.Component):
         self.register_function(self.get_jobid, 'GetJobID')
         self.register_function(self.set_jobid, 'SetJobID')
         self.register_function(self.handle_queue_history, "GetHistory")
-        self.register_function(self.run_script, 'RunScript')
         self.register_function(self.invoke_mpi_from_script, "ScriptMPI")
 
 
@@ -1485,20 +1507,29 @@ class CQM(Cobalt.Component.Component):
             self.logger.error("Failed to connect to the process manager")
             return
         live = [item['pgid'] for item in pgs]
-        for job in [j for queue in self.Queues for j in queue]:
+        for job in [j for queue in self.Queues for j in queue if j.mode!='script']:
             for pgtype in job.pgid.keys():
                 pgid = job.pgid[pgtype]
                 if pgid not in live:
                     self.logger.info("Found dead pg for job %s" % (job.jobid))
                     job.CompletePG(pgid)
 
-    def run_script(self, execname):
-        '''Ask the script manager to execute a script'''
-        sm = self.comms['sm']
-        
-        sm.CreateProcessGroup({'tag':'process-group', 'user':user, 'pgid':'*', 'executable':execname, 'location':"kwakers", 'jobid':"" })
-        
-    def  invoke_mpi_from_script(self, _, data):
+    def sm_sync(self):
+        '''Resynchronize with the script manager'''
+        try:
+            pgs = self.comms['sm'].GetProcessGroup([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
+        except Cobalt.Proxy.CobaltComponentError:
+            self.logger.error("Failed to connect to the script manager")
+            return
+        live = [item['pgid'] for item in pgs]
+        for job in [j for queue in self.Queues for j in queue if j.mode=='script']:
+            for pgtype in job.pgid.keys():
+                pgid = job.pgid[pgtype]
+                if pgid not in live:
+                    self.logger.info("Found dead pg for job %s" % (job.jobid))
+                    job.CompletePG(pgid)
+
+    def invoke_mpi_from_script(self, _, data):
         '''Invoke the real mpirun on behalf of a script being executed by the script manager.'''
         d = {'tag':'job', 'pgid':'*'}
         d.update(data)

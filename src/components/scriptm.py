@@ -16,7 +16,7 @@ class ProcessGroup(Cobalt.Data.Data):
         Cobalt.Data.Data.__init__(self, data)
         self.log = logging.getLogger('pg')
         self.set('pgid', pgid)
-        self.set('state', 'initializing')
+        self.set('state', 'running')
         try:
             userid, groupid = pwd.getpwnam(self.get('user'))[2:4]
         except KeyError:
@@ -34,10 +34,11 @@ class ProcessGroup(Cobalt.Data.Data):
         if not self.pid:
             program = self.get('executable')
             self.t = tempfile.NamedTemporaryFile()
-            self.t.write("\n".join(self.get('location').split(':')) + '\n')
+            self.t.write("\n".join(self.get('location')) + '\n')
             self.t.flush()
             # create a nodefile in /tmp
             os.environ['COBALT_NODEFILE'] = self.t.name
+            os.environ["COBALT_JOBID"] = self.get('jobid')
             try:
                 os.setgid(groupid)
                 os.setuid(userid)
