@@ -1,27 +1,56 @@
 '''Cobalt component base classes'''
 __revision__ = '$Revision$'
 
-__all__ = ["TCPServer", "XMLRPCServer"]
+__all__ = ["TCPServer", "XMLRPCRequestHandler", "XMLRPCServer", "Component"]
 
 import sys
 import os
 import socket
 import SocketServer
-import OpenSSL
 import SimpleXMLRPCServer
 import base64
 import signal
 import inspect
 import cPickle
 
+import tlslite.integration.TLSSocketServerMixIn
+import tlslite.api
+from tlslite.api import \
+    TLSSocketServerMixIn, parsePrivateKey, \
+    X509, X509CertChain, SessionCache, TLSError
+
 import Cobalt.Proxy
 
 
-class TCPServer (SocketServer.TCPServer):
+class TLSConnection (tlslite.api.TLSConnection):
     
-    """TCP server supporting SSL encryption."""
+    """TLSConnection supporting additional socket methods.
     
-    def __init__ (self, server_address, RequestHandlerClass, timeout=None, keyfile=None, certfile=None):
+    Methods:
+    shutdown -- shut down the underlying socket
+    """
+    
+    def shutdown (self, *args, **kwargs):
+        """Shut down the underlying socket."""
+        return self.sock.shutdown(*args, **kwargs)
+
+#monkeypatch TLSSocketServerMixIn's module to use new TLSConnection
+tlslite.integration.TLSSocketServerMixIn.TLSConnection = TLSConnection
+
+
+class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer):
+    
+    """TCP server supporting SSL encryption.
+    
+    Methods:
+    handshake -- perform a SSL/TLS handshake
+    finish -- properly close the connection
+    
+    Properties:
+    url -- A url pointing to this server.
+    """
+    
+    def __init__ (self, server_address, RequestHandlerClass, keyfile, certfile, reqCert=False, timeout=None):
         
         """Initialize the SSL-TCP server.
         
@@ -34,14 +63,39 @@ class TCPServer (SocketServer.TCPServer):
         
         SocketServer.TCPServer.__init__(self, server_address, RequestHandlerClass)
         
-        # encrypt with ssl
-        if keyfile or certfile:
-            context = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
-            context.use_privatekey_file(keyfile or certfile)
-            context.use_certificate_file(certfile or keyfile)
-            self.socket = OpenSSL.SSL.Connection(context, self.socket)
-        
         self.socket.settimeout(timeout)
+        
+        self.private_key = parsePrivateKey(file(keyfile).read())
+        x509 = X509()
+        x509.parse(file(certfile).read())
+        self.certificate_chain = X509CertChain([x509])
+        self.request_certificate = reqCert
+        self.sessions = SessionCache()
+    
+    def handshake (self, connection):
+        
+        """Perform the SSL/TLS handshake.
+        
+        Arguments:
+        connection -- handshake through this connection
+        """
+        
+        try:
+            connection.handshakeServer(
+                certChain = self.certificate_chain,
+                privateKey = self.private_key,
+                reqCert = self.request_certificate,
+                sessionCache = self.sessions,
+            )
+        except TLSError, e:
+            return False
+        
+        connection.ignoreAbruptClose = True
+        return True
+    
+    def finish (self):
+        SocketServer.TCPServer.finish(self)
+        self.request.close()
     
     def _get_url (self):
         address, port = self.socket.getsockname()
@@ -54,6 +108,14 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
     """Component XML-RPC request handler.
     
     Adds support for HTTP authentication.
+    
+    Exceptions:
+    CouldNotAuthenticate -- client did not present acceptable authentication information
+    
+    Methods:
+    authenticate -- prompt a check of a client's provided username and password
+    handle_one_request -- handle a single rpc (optionally authenticating)
+    finish -- properly close the socket
     """
     
     class CouldNotAuthenticate (Exception):
@@ -90,26 +152,35 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
                 return
         SimpleXMLRPCServer.SimpleXMLRPCRequestHandler.handle_one_request(self, *args, **kwargs)
     
-    def setup (self):
-        # Overriding setup to handle pyOpenSSL's lack of support for makefile()
-        self.connection = self.request
-        try:
-            self.rfile = self.connection.makefile('rb', self.rbufsize)
-        except NotImplementedError:
-            self.rfile = socket._fileobject(self.connection, "rb", self.rbufsize)
-            self.wfile = socket._fileobject(self.connection, "wb", self.wbufsize)
-        else:
-            self.wfile = self.connection.makefile('wb', self.wbufsize)
+    def finish(self):
+        """Properly close the handler socket."""
+        self.request.close()
 
 
 class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     
     """Component XMLRPCServer.
     
-    Provides passthrough access to HTTP authentication on request handler.
+    Inner classes:
+    DefaultRequestHandler -- default class used to handle requests
+    
+    Methods:
+    serve_daemon -- serve_forever in a daemonized process
+    serve_forever -- handle_one_request until not self.serve
+    shutdown -- stop serve_forever (by setting self.serve = False)
+    ping -- return all arguments received
+    
+    RPC methods:
+    ping
+    
+    (additional system.* methods are inherited from base dispatcher)
+    
+    Properties:
+    require_auth -- the request handler is requiring authorization
+    credentials -- valid credentials being used for authentication
     """
     
-    class XMLRPCRequestHandler (XMLRPCRequestHandler):
+    class DefaultRequestHandler (XMLRPCRequestHandler):
         """Default request handler."""
         # Subclassing prevents changes in authentication state
         # from changing the superclass state.
@@ -117,8 +188,8 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     def __init__ (self, server_address,
                   heartbeat=None,
                   keyfile=None, certfile=None,
-                  requestHandler=XMLRPCRequestHandler, logRequests=False,
-                  static=False, allow_none=True, encoding=None):
+                  requestHandler=DefaultRequestHandler, logRequests=False,
+                  dynamic=False, allow_none=True, encoding=None):
         
         """Initialize the XML-RPC server.
         
@@ -146,10 +217,11 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
             server_address, requestHandler, timeout=heartbeat, keyfile=keyfile, certfile=certfile)
         self.logRequests = logRequests
         self.serve = False
-        self.static = static
+        self.dynamic = dynamic
         self.register_introspection_functions()
         self.register_function(self.ping)
     
+    # support Python 2.5-style marshaled dispatch in Python < 2.5
     if sys.version_info[0] < 2 or (sys.version_info[0] == 2 and sys.version_info[1] < 5):
         def _marshaled_dispatch (self, data, dispatch_method=None):
             __doc__ = SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__doc__
@@ -170,7 +242,6 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
                 response = xmlrpclib.dumps(
                     xmlrpclib.Fault(1, "%s:%s" % (sys.exc_type, sys.exc_value)),
                     allow_none=self.allow_none, encoding=self.encoding)
-    
             return response
     
     def _get_require_auth (self):
@@ -217,12 +288,13 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         signal.signal(signal.SIGTERM, self.shutdown)
         
         self.serve_forever()
+        self.server_close()
         os._exit(0)
     
     def serve_forever (self):
         """Serve single requests until (self.serve == False)."""
         self.serve = True
-        if not self.static:
+        if self.dynamic:
             Cobalt.Proxy.Component("slp").register(self.instance.name, self.url)
         
         while self.serve:
@@ -230,9 +302,10 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
                 self.handle_request()
             except socket.timeout:
                 pass
-            self.instance.do_tasks()
+            if self.instance:
+                self.instance.do_tasks()
         
-        if not self.static:
+        if self.dynamic:
             Cobalt.Proxy.Component("slp").remove(self.instance.name)
     
     def shutdown (self):
@@ -256,6 +329,10 @@ class Component (object):
     Class attributes:
     name -- logical component name (e.g., "queue-manager", "process-manager")
     implementation -- implementation identifier (e.g., "BlueGene/L", "BlueGene/P")
+    
+    Methods:
+    save -- pickle the component to a file
+    do_tasks -- perform automatic tasks for the component
     """
     
     name = "component"
@@ -300,7 +377,7 @@ class Component (object):
             if getattr(func, "exposed", False)
         ]
 
-def expose (func):
+def exposed (func):
     """Mark a method to be exposed publically.
     
     Examples:
@@ -325,7 +402,7 @@ def hide (func):
     func.exposed = False
     return func
 
-def automate (func):
+def automatic (func):
     """Mark a method to be run continually."""
     func.automatic = True
     return func
