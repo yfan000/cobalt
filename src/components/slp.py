@@ -1,103 +1,126 @@
 #!/usr/bin/env python
 
-'''slp provides the service location protocol'''
+"""the service location protocol"""
+
 __revision__ = '$Revision$'
 
-from select import select, error as selecterror
-from time import time
-from xmlrpclib import Fault
 import getopt
 import sys
 
-from Cobalt.Data import Data, DataSet
-from Cobalt.Component import Component
+from Cobalt.Component import Component, exposed, automatic
+from Cobalt.Server import XMLRPCServer, find_intended_location
+from xmlrpclib import ServerProxy
 
-import Cobalt.Logging
 
-class Location(Data):
+class ServiceLocator (Component):
+    """Generic implementation of the service-location component.
     
-    """Location class for service assertions"""
+    Exceptions:
+    LookupError -- unable to find the location of the requested component
     
-    fields = Data.fields.copy()
-    fields.update(dict(
-        name = None,
-        url = None,
-    ))
+    Methods:
+    register -- register a service (exposed)
+    unregister -- remove a service from the registry (exposed)
+    lookup -- retrieve the location of a service (exposed)
+    list_services -- retrieve the names of all registered services (exposed)
+    expire_services -- remove unresponsive services from the registry (automatic)
+    """
+    
+    name = "service-location"
+    
+    class LookupError (Exception):
+        """Unable to locate the requested service."""
+    
+    def __init__ (self, *args, **kwargs):
+        """Initialize a new ServiceLocator.
+        
+        All arguments are passed to the component constructor.
+        """
+        Component.__init__(self, *args, **kwargs)
+        self.services = dict()
+    
+    def register (self, service, url):
+        """Register the availability of a service.
+        
+        Arguments:
+        service -- name of the service to register
+        url -- url of the service
+        """
+        self.services[service] = url
+    register = exposed(register)
+    
+    def unregister (self, service):
+        """Remove a service from the registry.
+        
+        Arguments:
+        service -- name of the service to remove
+        """
+        try:
+            del self.services[service]
+        except KeyError:
+            pass
+    unregister = exposed(unregister)
+    
+    def lookup (self, service):
+        """Retrieve the url for a service.
+        
+        Arguments:
+        service -- name of the service to look up
+        """
+        try:
+            return self.services[service]
+        except KeyError:
+            raise self.LookupError(service)
+    lookup = exposed(lookup)
+    
+    def list_services (self):
+        """List the names of all registered services."""
+        return self.services.keys()
+    list_services = exposed(list_services)
+    
+    def expire_services (self, services=None):
+        """Unregister unresponsive services.
+        
+        Arguments:
+        services -- list of services to check (default: all registered)
+        """
+        for service in services or self.services.keys():
+            try:
+                ServerProxy(self.lookup(service)).ping()
+            except: # specify an exception class here
+                self.unregister(service)
+    expire_services = automatic(expire_services)
 
-    def __init__(self, spec):
-        Data.__init__(self, spec)
-
-    def renew(self):
-        self.touch()
-
-    def expired(self):
-        '''Detect expired service'''
-        return (time() - self.stamp) > 300
-
-class Slp(Component, DataSet):
-    '''slp provides a simple service location protocol implementation'''
-    __name__ = 'service-location'
-    __implementation__ = 'slp'
-    __srvtimeout___ = 180
-    __object__ = Location
-    async_funcs = ['timeout_services']
-
-    def __init__(self, setup):
-        Component.__init__(self, setup)
-        DataSet.__init__(self)
-        self.register_function(self.assert_service, "AssertService")
-        self.register_function(self.lookup_service, "LookupService")
-        self.register_function(self.deassert_service, "DeassertService")
-
-    def assert_service(self, address, data):
-        '''Assert service with slp'''
-        # first try to assert existing services
-        retval = self.Get([data], lambda service, args:service.renew())
-        if not retval:
-            self.logger.info("Adding new service %s at %s" % (data['name'], data['url']))
-            retval = self.Add([data])
-        return retval
-
-    def lookup_service(self, address, service):
-        '''Lookup a service in the slp'''
-        retval = self.Get(service)
-        if not retval:
-            raise Fault(11, "No Matching Service")
-        return retval
-
-    def deassert_service(self, address, spec):
-        '''Remove service registration'''
-        retval = self.Del(spec, lambda item,dummy:self.logger.info("Removed service %s at %s" %
-                                                                   (item.name, item.url)))
-        if not retval:
-            raise Fault(11, "No Matching Service")
-        return retval
-
-    def timeout_services(self):
-        '''Remove services that havent asserted in __svctimeout__'''
-        for srv in [service for service in self.data if service.expired()]:
-            self.logger.info("Flushing registration for component %s" % (srv.name))
-            self.data.remove(srv)
 
 if __name__ == '__main__':
     try:
         (opts, arg) = getopt.getopt(sys.argv[1:], 'C:D:')
     except getopt.GetoptError, msg:
         print "%s\nUsage:\nslp.py [-D pidfile] [-C config file]" % (msg)
-        raise SystemExit, 1
-
-    configfile = ""
+        sys.exit(1)
+    
+    # default settings
+    configfile = "/etc/cobalt.conf"
     daemon = False
+    pidfile = ""
+    
+    # get user input
     for item in opts:
         if item[0] == '-C':
             configfile = item[1]
         elif item[0] == '-D':
-            daemon = item[1]
-    if not configfile:
-        configfile = '/etc/cobalt.conf'
-
-    ssetup = {'debug':False, 'configfile':configfile, 'daemon':daemon}
-    server = Slp(ssetup)
-    Cobalt.Logging.setup_logging('slp', level=0)
-    server.serve_forever()
-
+            daemon = True
+            pidfile = item[1]
+    
+    # I'm not sure what this does yet.
+    # Use it when we add logging.
+    #Cobalt.Logging.setup_logging('slp', level=0)
+    
+    service_locator = ServiceLocator()
+    location = find_intended_location(service_locator)
+    server = XMLRPCServer(location, "/etc/cobalt.key", "/etc/cobalt.key", register=False)
+    server.register_instance(service_locator)
+    if daemon:
+        server.serve_daemon(pidfile=pidfile)
+    else:
+        server.serve_forever()
