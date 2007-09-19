@@ -170,7 +170,7 @@ class system(ComponentProxy):
     methods = ['StartJob', 'QueryJobs', 'KillJob', 'GetPartition', 'AddPartition',
                'DelPartition', 'FullPartitionInfo', 'ReservePartition',
                'ReleasePartition', 'ReserveNodecards', 'ReleaseNodecards',
-               'GetState', 'GetDB2State']
+               'GetState', 'GetDB2State', 'SetOvertimeFrac', 'SetFailedReleaseFrac']
 
 class CommDict(dict):
     '''CommDict is a dictionary that automatically instantiates a component proxy upon access'''
