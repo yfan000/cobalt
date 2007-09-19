@@ -930,8 +930,8 @@ class ScriptMPIJob(Job):
 
         try:
             pgroup = self.comms['pm'].CreateProcessGroup(
-                {'tag':'process-group', 'user':self.get('user'), 'pgid':'*', 'outputfile':self.get('outputpath'),
-                 'errorfile':self.get('errorpath'), 'path':self.get('path'), 'cwd':self.get('outputdir'), 'location':[self.get('location')],
+                {'tag':'process-group', 'user':self.get('user'), 'pgid':'*', 'outputfile':self.get('outputpath', ''),
+                 'errorfile':self.get('errorpath', ''), 'path':self.get('path', ''), 'cwd':self.get('outputdir', ''), 'location':[self.get('location')],
                  'jobid':self.get('jobid'), 'inputfile':self.get('inputfile', ''), 'true_mpi_args':self.get('true_mpi_args'), 'envs':{}})
         except xmlrpclib.Fault:
             raise ScriptManagerError

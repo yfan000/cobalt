@@ -39,7 +39,7 @@ if __name__ == '__main__':
     for a in bad_args:
         try:
             idx = arglist.index(a)
-            arglist = arglist[1:idx] + arglist[idx+2:]
+            arglist = arglist[0:idx] + arglist[idx+2:]
             print "NOTE: the %s option should not be used." % a
         except ValueError:
             pass
