@@ -123,4 +123,7 @@ if __name__ == '__main__':
     if daemon:
         server.serve_daemon(pidfile=pidfile)
     else:
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()

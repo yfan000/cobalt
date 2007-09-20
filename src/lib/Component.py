@@ -6,6 +6,7 @@ __all__ = ["Component", "exposed", "automatic"]
 
 import inspect
 import cPickle
+import pydoc
 
 
 def exposed (func):
@@ -82,18 +83,27 @@ class Component (object):
             if getattr(func, "automatic", False):
                 func()
     
+    def _resolve_exposed_method (self, method_name):
+        """Resolve an exposed method.
+        
+        Arguments:
+        method_name -- name of the method to resolve
+        """
+        try:
+            func = getattr(self, method_name)
+        except AttributeError:
+            raise Exception('method "%s" is not supported' % method_name)
+        if not getattr(func, "exposed", False):
+            raise Exception('method "%s" is not supported' % method_name)
+        return func
+    
     def _dispatch (self, method, args):
         """Custom XML-RPC dispatcher for components.
         
         method -- XML-RPC method name
         args -- tuple of paramaters to method
         """
-        try:
-            func = getattr(self, method)
-        except AttributeError:
-            raise Exception('method "%s" is not supported' % method)
-        if not getattr(func, "exposed", False):
-            raise Exception('method "%s" is not supported' % method)
+        func = self._resolve_exposed_method(method)
         return func(*args)
     
     def _listMethods (self):
@@ -102,6 +112,18 @@ class Component (object):
             name for name, func in inspect.getmembers(self, callable)
             if getattr(func, "exposed", False)
         ]
+    
+    def _methodHelp (self, method_name):
+        """Custom XML-RPC introspective method help.
+        
+        Arguments:
+        method_name -- name of method to get help on
+        """
+        try:
+            func = self._resolve_exposed_method(method_name)
+        except Exception:
+            return ""
+        return pydoc.getdoc(func)
     
     def get_name (self):
         """The name of the component."""

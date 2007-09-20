@@ -40,19 +40,19 @@ def ComponentProxy (component_name, *args, **kwargs):
     Additional arguments are passed to the ServerProxy constructor.
     """
     if component_name in known_components:
-        return ServerProxy(self.components[component_name], *args, **kwargs)
+        return ServerProxy(known_components[component_name], *args, **kwargs)
     elif component_name != "service-location":
         try:
             slp = ComponentProxy("service-location")
         except ComponentLookupError:
             raise ComponentLookupError(component_name)
         try:
-            address = slp.lookup(component)
+            address = slp.lookup(component_name)
         except Fault:
-            raise ComponentLookupError(component)
+            raise ComponentLookupError(component_name)
         return ServerProxy(address, *args, **kwargs)
     else:
-        raise ComponentLookupError(component)
+        raise ComponentLookupError(component_name)
                 
 
 def find_configured_locations (config_files=None):
@@ -74,4 +74,4 @@ def find_configured_locations (config_files=None):
         (component, config.get("components", component))
         for component in components
     ])
-    return known_components.keys()
+    return known_components.copy()

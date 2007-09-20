@@ -69,37 +69,52 @@ class TLSConnection (tlslite.api.TLSConnection):
 tlslite.integration.TLSSocketServerMixIn.TLSConnection = TLSConnection
 
 
-class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer):
+class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer, object):
     
     """TCP server supporting SSL encryption.
     
     Methods:
     handshake -- perform a SSL/TLS handshake
-    finish -- properly close the connection
     
     Properties:
     url -- A url pointing to this server.
     """
     
-    def __init__ (self, server_address, RequestHandlerClass, keyfile, certfile, reqCert=False, timeout=None):
+    allow_reuse_address = True
+    
+    def __init__ (self, server_address, RequestHandlerClass, keyfile=None, certfile=None, reqCert=False, timeout=None):
         
         """Initialize the SSL-TCP server.
         
         Arguments:
         server_address -- address to bind to the server
         RequestHandlerClass -- class to handle requests
+        
+        Keyword arguments:
         keyfile -- private encryption key filename (enables ssl encryption)
         certfile -- certificate file (enables ssl encryption)
+        reqCert -- client must present certificate
+        timeout -- timeout for non-blocking request handling
         """
         
         SocketServer.TCPServer.__init__(self, server_address, RequestHandlerClass)
         
         self.socket.settimeout(timeout)
         
-        self.private_key = parsePrivateKey(file(keyfile).read())
-        x509 = X509()
-        x509.parse(file(certfile).read())
-        self.certificate_chain = X509CertChain([x509])
+        if keyfile or certfile:
+            keyfile = open(keyfile or certfile)
+            self.private_key = parsePrivateKey(keyfile.read())
+            keyfile.close()
+            x509 = X509()
+            certfile = open(certfile or keyfile)
+            x509.parse(certfile.read())
+            certfile.close()
+            self.certificate_chain = X509CertChain([x509])
+        else:
+            if reqCert:
+                raise TypeError("use of reqCert requires a keyfile/certfile")
+            self.private_key = None
+            self.certificate_chain = None
         self.request_certificate = reqCert
         self.sessions = SessionCache()
     
@@ -124,13 +139,24 @@ class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer):
         connection.ignoreAbruptClose = True
         return True
     
-    def finish (self):
-        SocketServer.TCPServer.finish(self)
-        self.request.close()
+    def finish_request (self, *args, **kwargs):
+        """Support optional ssl/tls handshaking."""
+        if self.private_key and self.certificate_chain:
+            TLSSocketServerMixIn.finish_request(self, *args, **kwargs)
+        else:
+            SocketServer.TCPServer.finish_request(self, *args, **kwargs)
+    
+    def _get_secure (self):
+        return self.private_key and self.certificate_chain
+    secure = property(_get_secure)
     
     def _get_url (self):
         address, port = self.socket.getsockname()
-        return "https://%s:%i" % (address, port)
+        if self.secure:
+            protocol = "https"
+        else:
+            protocol = "http"
+        return "%s://%s:%i" % (protocol, address, port)
     url = property(_get_url)
 
 
@@ -146,7 +172,6 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
     Methods:
     authenticate -- prompt a check of a client's provided username and password
     handle_one_request -- handle a single rpc (optionally authenticating)
-    finish -- properly close the socket
     """
     
     class CouldNotAuthenticate (Exception):
@@ -158,21 +183,30 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
     def authenticate (self):
         """Authenticate the credentials of the latest client."""
         try:
-            header = self.headers['Authentication']
+            header = self.headers['Authorization']
         except KeyError:
+            print >> file("outfile", "w"), self.headers
             raise self.CouldNotAuthenticate("client did not present credentials")
         auth_type, auth_content = header.split()
         auth_content = base64.standard_b64decode(auth_content)
-        username, password = auth_content.split(":")
         try:
-            valid_password == self.credentials[username]
+            username, password = auth_content.split(":")
+        except ValueError:
+            username = auth_content
+            password = ""
+        try:
+            valid_password = self.credentials[username]
         except KeyError:
             raise self.CouldNotAuthenticate("unknown user: %s" % username)
         if password != valid_password:
             raise self.CouldNotAuthenticate("invalid password for %s" % username)
     
-    def handle_one_request (self, *args, **kwargs):
-        """Optionally check HTTP authentication before handle_request."""
+    def parse_request (self):
+        """Extends parse_request.
+        
+        Optionally check HTTP authentication when parsing."""
+        if not SimpleXMLRPCServer.SimpleXMLRPCRequestHandler.parse_request(self):
+            return False
         if self.require_auth:
             try:
                 self.authenticate()
@@ -180,20 +214,13 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
                 code = 401
                 message, explanation = self.responses[401]
                 self.send_error(code, message)
-                return
-        SimpleXMLRPCServer.SimpleXMLRPCRequestHandler.handle_one_request(self, *args, **kwargs)
-    
-    def finish(self):
-        """Properly close the handler socket."""
-        self.request.close()
+                return False
+        return True
 
 
-class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
+class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object):
     
     """Component XMLRPCServer.
-    
-    Inner classes:
-    DefaultRequestHandler -- default class used to handle requests
     
     Methods:
     serve_daemon -- serve_forever in a daemonized process
@@ -211,24 +238,20 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
     credentials -- valid credentials being used for authentication
     """
     
-    class DefaultRequestHandler (XMLRPCRequestHandler):
-        """Default request handler."""
-        # Subclassing prevents changes in authentication state
-        # from changing the superclass state.
-    
-    def __init__ (self, server_address, keyfile, certfile,
-                  heartbeat=None,
-                  requestHandler=DefaultRequestHandler, logRequests=False,
+    def __init__ (self, server_address, RequestHandlerClass=None,
+                  keyfile=None, certfile=None,
+                  timeout=None,
+                  logRequests=False,
                   register=True, allow_none=True, encoding=None):
         
         """Initialize the XML-RPC server.
         
         Arguments:
         server_address -- address to bind to the server
-        keyfile -- private encryption key filename
-        certfile -- certificate file
         
         Keyword arguments:
+        keyfile -- private encryption key filename
+        certfile -- certificate file
         requestHandler -- request handler used by TCP server
         logRequests -- log all requests (default False)
         register -- presence should be reported to service-location (default True)
@@ -243,13 +266,26 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
             self.allow_none = allow_none
             self.encoding = encoding
         
+        if not RequestHandlerClass:
+            class RequestHandlerClass (XMLRPCRequestHandler):
+                """A subclassed request handler to prevent class-attribute conflicts."""
+        
         TCPServer.__init__(self,
-            server_address, requestHandler, timeout=heartbeat, keyfile=keyfile, certfile=certfile)
+            server_address, RequestHandlerClass,
+            timeout=timeout, keyfile=keyfile, certfile=certfile)
         self.logRequests = logRequests
         self.serve = False
         self.register = register
         self.register_introspection_functions()
         self.register_function(self.ping)
+        
+        if self.register:
+            ComponentProxy("service-location").register(self.instance.name, self.url)
+    
+    def server_close (self):
+        TCPServer.server_close(self)
+        if self.register:
+            ComponentProxy("service-location").unregister(self.instance.name)
     
     # support Python 2.5-style marshaled dispatch in Python < 2.5
     if sys.version_info[0] < 2 or (sys.version_info[0] == 2 and sys.version_info[1] < 5):
@@ -286,13 +322,11 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         self.RequestHandlerClass.credentials = value
     credentials = property(_get_credentials, _set_credentials)
     
-    def serve_daemon (self, pidfile=None, stdout=None, stderr=None):
+    def serve_daemon (self, pidfile=None):
         
         """Implement serve_forever inside a daemon.
         
-        Keyword arguments:
-        stdout -- file to use as stdout for the daemon
-        stderr -- file to use as stderr for the daemon
+        Arguments:
         pidfile -- file in which to record daemon pid
         """
         
@@ -306,28 +340,28 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
         if child_pid != 0:
             os._exit(0)
         
-        sys.stdout = file(stdout or os.devnull, "w")
-        sys.stderr = file(stderr or os.devnull, "w")
-        pidfile = file(pidfile or os.devnull, "w")
+        #redirect_file = open(os.devnull, "w+")
+        #os.dup2(redirect_file.fileno(), sys.__stdin__.fileno())
+        #os.dup2(redirect_file.fileno(), sys.__stdout__.fileno())
+        #os.dup2(redirect_file.fileno(), sys.__stderr__.fileno())
         
         os.chdir(os.sep)
         os.umask(0)
         
+        pidfile = open(pidfile or os.devnull, "w")
         print >> pidfile, os.getpid()
         pidfile.close()
         
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
         
+        self.serve = True
         self.serve_forever()
         self.server_close()
         os._exit(0)
     
     def serve_forever (self):
         """Serve single requests until (self.serve == False)."""
-        self.serve = True
-        if self.register:
-            ComponentProxy("service-location").register(self.instance.name, self.url)
         
         while self.serve:
             try:
@@ -336,9 +370,6 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
                 pass
             if self.instance:
                 self.instance.do_tasks()
-        
-        if self.register:
-            ComponentProxy("service-location").unregister(self.instance.name)
     
     def shutdown (self):
         """Signal that automatic service should stop."""
