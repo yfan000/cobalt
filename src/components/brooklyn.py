@@ -10,7 +10,7 @@ try:
 except NameError:
     import sets
     set = sets.Set
-
+    
 def checkpid(somepid):
     '''checks if the specified pid is still around'''
     process_list = os.popen('ps ax')
