@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''Cobalt qsub command'''
-__revision__ = '$Revision$'
+__revision__ = '$Revision: 559 $'
 __version__ = '$Version$'
 
 import os, sys, pwd, os.path, popen2, xmlrpclib, ConfigParser, re, logging
@@ -40,25 +40,26 @@ def processfilter(cmdstr, jobdict):
                 jobdict[key] = value
 
 helpmsg = """
-Usage: cqsub [-d] [-v] -p <project> -q <queue> -C <working directory>
-             -e envvar1=value1:envvar2=value2 -k <kernel profile>
+Usage: qsub [-d] [-v] -A <project name> -q <queue> --cwd <working directory>
+             --env envvar1=value1:envvar2=value2 --kernel <kernel profile>
              -K <kernel options> -O <outputprefix> -t time <in minutes>
-             -E <error file path> -o <output file path> -i <input file path>
-             -n <number of nodes> -h -c <processor count> -m <mode co/vn> <command> <args>
+             -e <error file path> -o <output file path> -i <input file path>
+             -n <number of nodes> -h --proccount <processor count> 
+             --mode <mode co/vn> <command> <args>
 """
 
 if __name__ == '__main__':
     options = {'v':'verbose', 'd':'debug', 'version':'version', 'h':'held'}
-    doptions = {'n':'nodecount', 't':'time', 'p':'project', 'm':'mode',
-                'c':'proccount', 'C':'cwd', 'e':'env', 'k':'kernel',
+    doptions = {'n':'nodecount', 't':'time', 'A':'project', 'mode':'mode',
+                'proccount':'proccount', 'cwd':'cwd', 'env':'env', 'kernel':'kernel',
                 'K':'kerneloptions', 'q':'queue', 'O':'outputprefix',
-                'p':'project', 'N':'notify', 'E':'error', 'o':'output',
+                'A':'project', 'M':'notify', 'e':'error', 'o':'output',
                 'i':'inputfile'}
     (opts, command) = Cobalt.Util.dgetopt_long(sys.argv[1:],
                                                options, doptions, helpmsg)
     # need to filter here for all args
     if opts['version']:
-        print "cqsub %s" % __revision__
+        print "qsub %s" % __revision__
         print "cobalt %s" % __version__
         raise SystemExit, 1
 
@@ -66,8 +67,8 @@ if __name__ == '__main__':
     level = 30
     if '-d' in sys.argv:
         level = 10
-    Cobalt.Logging.setup_logging('cqsub', to_syslog=False, level=level)
-    logger = logging.getLogger('cqsub')
+    Cobalt.Logging.setup_logging('qsub', to_syslog=False, level=level)
+    logger = logging.getLogger('qsub')
 
     CP = ConfigParser.ConfigParser()
     CP.read(['/etc/cobalt.conf'])
@@ -142,9 +143,9 @@ if __name__ == '__main__':
     except:
         sys_type = 'bgl'
     if sys_type == 'bgp':
-        job_types = ['smp', 'co', 'dual', 'vn', 'script']
+        job_types = ['smp', 'co', 'dual', 'vn']
     else:
-        job_types = ['co', 'vn', 'script']
+        job_types = ['co', 'vn']
         
     if not opts['mode']:
         opts['mode'] = 'co'
@@ -199,7 +200,7 @@ if __name__ == '__main__':
     if opts['output']:
         jobspec.update({'outputpath': opts['output']})
     if opts['held']:
-        jobspec.update({'state':'hold'})
+        jobspec.update({'state':'user hold'})
     if opts['env']:
         jobspec['envs'] = {}
         [jobspec['envs'].update({key:value}) for key, value
@@ -212,7 +213,7 @@ if __name__ == '__main__':
         if not os.path.isfile(jobspec.get('inputfile')):
             logger.error("file %s not found, or is not a file" % jobspec.get('inputfile'))
             raise SystemExit, 1
-    jobspec.update({'cwd':opts['cwd'], 'command':command[0], 'args':command[1:]})
+    jobspec.update({'command':command[0], 'args':command[1:]})
 
     try:
         filters = CP.get('cqm', 'filters').split(':')
@@ -238,7 +239,7 @@ if __name__ == '__main__':
             logger.error("System draining. Try again later")
             raise SystemExit, 1
         elif flt.faultCode == 30:
-            logger.error("Job submission failed because: \n%s\nCheck 'cqstat -q' and the cqstat manpage for more details." % flt.faultString)
+            logger.error("Job submission failed because: \n%s\nCheck 'qstat -q' and the qstat manpage for more details." % flt.faultString)
             raise SystemExit, 1
         elif flt.faultCode == 1:
             logger.error("Job submission failed due to queue-manager failure")

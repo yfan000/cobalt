@@ -75,3 +75,4 @@ def find_configured_locations (config_files=None):
         for component in components
     ])
     return known_components.copy()
+
