@@ -18,7 +18,8 @@ if __name__ == '__main__':
     if '-d' in sys.argv:
         level = 10
     Cobalt.Logging.setup_logging('cmd', to_syslog=False, level=level)
-    slp = Cobalt.Proxy.service_location()
+    Cobalt.Proxy.find_configured_locations()
+    slp = Cobalt.Proxy.ComponentProxy("service-location")
     try:
         locations = slp.LookupService([{'tag':'location', 'name':'*', 'stamp':'*', 'url':'*'}])
     except xmlrpclib.Fault, flt:
@@ -28,7 +29,7 @@ if __name__ == '__main__':
         else:
             print "Unknown Fault %s" % (flt.faultString)
             raise SystemExit, 1
-    except Cobalt.Proxy.CobaltComponentError:
+    except Cobalt.Proxy.ComponentLookupError:
         print "Failed to connect to service location component"
         raise SystemExit, 1
 

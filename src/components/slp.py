@@ -5,8 +5,10 @@
 __revision__ = '$Revision$'
 
 import getopt
+import logging
 import sys
 
+import Cobalt.Logging
 from Cobalt.Component import Component, exposed, automatic
 from Cobalt.Server import XMLRPCServer, find_intended_location
 from xmlrpclib import ServerProxy
@@ -114,16 +116,19 @@ if __name__ == '__main__':
     
     # I'm not sure what this does yet.
     # Use it when we add logging.
-    #Cobalt.Logging.setup_logging('slp', level=0)
+    Cobalt.Logging.setup_logging('slp', level=0)
     
     service_locator = ServiceLocator()
     location = find_intended_location(service_locator)
     server = XMLRPCServer(location, "/etc/cobalt.key", "/etc/cobalt.key", register=False)
     server.register_instance(service_locator)
+    l = logging.getLogger('foo')
     if daemon:
         server.serve_daemon(pidfile=pidfile)
     else:
         try:
             server.serve_forever()
+        except:
+            l.error('something failed', exc_info=1)            
         finally:
             server.server_close()
