@@ -351,7 +351,6 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
         
-        self.serve = True
         self.serve_forever()
         self.server_close()
         os._exit(0)
@@ -359,6 +358,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
     def serve_forever (self):
         """Serve single requests until (self.serve == False)."""
         
+        self.serve = True
         while self.serve:
             try:
                 self.handle_request()
