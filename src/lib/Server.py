@@ -336,10 +336,10 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
         if child_pid != 0:
             os._exit(0)
         
-        #redirect_file = open(os.devnull, "w+")
-        #os.dup2(redirect_file.fileno(), sys.__stdin__.fileno())
-        #os.dup2(redirect_file.fileno(), sys.__stdout__.fileno())
-        #os.dup2(redirect_file.fileno(), sys.__stderr__.fileno())
+        redirect_file = open(os.devnull, "w+")
+        os.dup2(redirect_file.fileno(), sys.__stdin__.fileno())
+        os.dup2(redirect_file.fileno(), sys.__stdout__.fileno())
+        os.dup2(redirect_file.fileno(), sys.__stderr__.fileno())
         
         os.chdir(os.sep)
         os.umask(0)
