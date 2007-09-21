@@ -102,13 +102,9 @@ class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer, object):
         self.socket.settimeout(timeout)
         
         if keyfile or certfile:
-            keyfile = open(keyfile or certfile)
-            self.private_key = parsePrivateKey(keyfile.read())
-            keyfile.close()
+            self.private_key = parsePrivateKey(open(keyfile or certfile).read())
             x509 = X509()
-            certfile = open(certfile or keyfile)
-            x509.parse(certfile.read())
-            certfile.close()
+            x509.parse(open(certfile or keyfile).read())
             self.certificate_chain = X509CertChain([x509])
         else:
             if reqCert:
