@@ -237,21 +237,20 @@ class DataSet(object):
         '''remove an element from the set'''
         self.data.remove(x)
 
-    def Add(self, cdata, callback=None, cargs={}):
+    def Add(self, specs, callback=None, cargs={}):
         """Construct new items of type self.__object__ in the dataset.
         
         Arguments:
-        cdata -- The first argument to be passed to the data constructor.
-            If cdata is a list, construct multiple items.
+        specs -- a dictionary (or list of dictionaries) specifying the object(s) to create
         callback -- Applied to each new item after it is constructed. (optional)
         cargs -- A tuple of arguments to pass to callback after the new object.
         
         Returns a list of transmittable representations of the new items.
         """
         retval = []
-        if not isinstance(cdata, types.ListType):
-            cdata = [cdata]
-        for item in cdata:
+        if not isinstance(specs, types.ListType):
+            specs = [specs]
+        for item in specs:
             try:
                 if self.__id__:
                     iobj = self.__object__(item, self.__id__.get())
@@ -267,38 +266,36 @@ class DataSet(object):
             retval.append(iobj.to_rx(item))
         return retval
 
-    def Get(self, cdata, callback=None, cargs={}):
+    def Get(self, specs, callback=None, cargs={}):
         """Return a list of transmittable representations of items.
         
         Arguments:
-        cdata -- A dictionary representing criteria to match.
-            If cdata is a list, match against multiple sets of criteria.
+        specs -- a dictionary (or list of dictionaries) specifying the objects to match
         callback -- Applied to each matched item. (optional)
         cargs -- A tuple of arguments to pass to callback after the item.
         """
         retval = []
-        if not isinstance(cdata, types.ListType):
-            cdata = [cdata]
-        for spec in cdata:
+        if not isinstance(specs, types.ListType):
+            specs = [specs]
+        for spec in specs:
             for item in [datum for datum in self if datum.match(spec)]:
                 if callback:
                     callback(item, cargs)
                 retval.append(item.to_rx(spec))
         return retval
 
-    def Del(self, cdata, callback=None, cargs={}):
+    def Del(self, specs, callback=None, cargs={}):
         """Delete items from the dataset.
         
         Arguments:
-        cdata -- A dictionary representing criteria to match.
-            If cdata is a list, match against multiple sets of criteria.
+        specs -- a dictionary (or list of dictionaries) specifying the object(s) to create
         callback -- Applied to each matched item. (optional)
         cargs -- A tuple of arguments to pass to callback after the item.
         """
         retval = []
-        if not isinstance(cdata, types.ListType):
-            cdata = [cdata]
-        for spec in cdata:
+        if not isinstance(specs, types.ListType):
+            specs = [specs]
+        for spec in specs:
             for item in [datum for datum in self.data if datum.match(spec)]:
                 self.data.remove(item)
                 if callback:

@@ -236,7 +236,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
     
     def __init__ (self, server_address, RequestHandlerClass=None,
                   keyfile=None, certfile=None,
-                  timeout=None,
+                  timeout=10,
                   logRequests=False,
                   register=True, allow_none=True, encoding=None):
         
@@ -244,11 +244,11 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
         
         Arguments:
         server_address -- address to bind to the server
+        RequestHandlerClass -- request handler used by TCP server (optional)
         
         Keyword arguments:
         keyfile -- private encryption key filename
         certfile -- certificate file
-        requestHandler -- request handler used by TCP server
         logRequests -- log all requests (default False)
         register -- presence should be reported to service-location (default True)
         allow_none -- allow None values in xml-rpc
@@ -348,28 +348,34 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
         print >> pidfile, os.getpid()
         pidfile.close()
         
-        signal.signal(signal.SIGINT, self.shutdown)
-        signal.signal(signal.SIGTERM, self.shutdown)
-        
         self.serve_forever()
         self.server_close()
         os._exit(0)
     
     def serve_forever (self):
         """Serve single requests until (self.serve == False)."""
-        
         self.serve = True
-        while self.serve:
-            try:
-                self.handle_request()
-            except socket.timeout:
-                pass
-            if self.instance:
-                self.instance.do_tasks()
+        #sigint = signal.signal(signal.SIGINT, self._handle_shutdown_signal)
+        #sigterm = signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
+        try:
+            while self.serve:
+                try:
+                    self.handle_request()
+                except socket.timeout:
+                    pass
+                if self.instance and hasattr(self.instance, "do_tasks"):
+                    self.instance.do_tasks()
+        finally:
+            pass
+            #signal.signal(signal.SIGINT, sigint)
+            #signal.signal(signal.SIGTERM, sigterm)
     
     def shutdown (self):
         """Signal that automatic service should stop."""
         self.serve = False
+    
+    def _handle_shutdown_signal (self, signum, frame):
+        self.shutdown = True
     
     def ping (self, *args):
         """Echo response."""

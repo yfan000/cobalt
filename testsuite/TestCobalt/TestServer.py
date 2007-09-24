@@ -3,7 +3,7 @@ import threading
 import xmlrpclib
 
 from Cobalt.Server import find_intended_location, XMLRPCServer
-from Cobalt.Component import Component
+from Cobalt.Components.base import Component
 
 class TestFindIntendedLocation (object):
     

@@ -8,7 +8,6 @@ import inspect
 import cPickle
 import pydoc
 
-
 def exposed (func):
     """Mark a method to be exposed publically.
     
@@ -30,6 +29,10 @@ def automatic (func):
     """Mark a method to be run continually."""
     func.automatic = True
     return func
+
+
+class NoExposedMethod (Exception):
+    """There is no method exposed with the given name."""
 
 
 class Component (object):
@@ -92,9 +95,9 @@ class Component (object):
         try:
             func = getattr(self, method_name)
         except AttributeError:
-            raise Exception('method "%s" is not supported' % method_name)
+            raise NoExposedMethod(method_name)
         if not getattr(func, "exposed", False):
-            raise Exception('method "%s" is not supported' % method_name)
+            raise NoExposedMethod(method_name)
         return func
     
     def _dispatch (self, method, args):
@@ -121,7 +124,7 @@ class Component (object):
         """
         try:
             func = self._resolve_exposed_method(method_name)
-        except Exception:
+        except NoExposedMethod:
             return ""
         return pydoc.getdoc(func)
     

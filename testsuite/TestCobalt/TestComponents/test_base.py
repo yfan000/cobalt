@@ -1,4 +1,4 @@
-from Cobalt.Component import Component, exposed, automatic
+from Cobalt.Components.base import Component, exposed, automatic
 
 
 class TestComponent (object):

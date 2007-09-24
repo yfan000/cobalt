@@ -13,8 +13,7 @@ from xmlrpclib import ServerProxy, Fault
 from ConfigParser import SafeConfigParser, NoSectionError, NoOptionError
 
 __all__ = [
-    "ComponentProxy", "ComponentLookupError",
-    "known_components", "find_configured_locations",
+    "ComponentProxy", "ComponentLookupError", "find_configured_locations",
 ]
 
 
@@ -47,8 +46,10 @@ def ComponentProxy (component_name, *args, **kwargs):
         except ComponentLookupError:
             raise ComponentLookupError(component_name)
         try:
-            address = slp.lookup(component_name)
+            address = slp.locate(component_name)
         except Fault:
+            raise ComponentLookupError(component_name)
+        if not address:
             raise ComponentLookupError(component_name)
         return ServerProxy(address, *args, **kwargs)
     else:
@@ -76,3 +77,5 @@ def find_configured_locations (config_files=None):
     ])
     return known_components.copy()
 
+
+find_configured_locations()
