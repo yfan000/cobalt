@@ -32,10 +32,11 @@ import logging
 import sys
 import socket
 import time
+import sets
 from xmlrpclib import ServerProxy
 
 import Cobalt.Logging
-from Cobalt.Data import Data, DataSet
+from Cobalt.Data import Data, DataDict
 from Cobalt.Components.base import Component, exposed, automatic
 from Cobalt.Server import XMLRPCServer, find_intended_location
 
@@ -60,10 +61,10 @@ class Service (Data):
     required_fields = ["name", "location"]
 
 
-class ServiceSet (DataSet):
+class ServiceDict (DataDict):
     
-    __object__ = Service
-    __unique__ = "name"
+    item_cls = Service
+    key = "name"
 
 
 class ServiceLocator (Component):
@@ -85,7 +86,7 @@ class ServiceLocator (Component):
         All arguments are passed to the component constructor.
         """
         Component.__init__(self, *args, **kwargs)
-        self.services = ServiceSet()
+        self.services = ServiceDict()
     
     def register (self, service_name, location):
         """Register the availability of a service.
@@ -98,7 +99,7 @@ class ServiceLocator (Component):
             service = self.services[service_name]
         except KeyError:
             service = Service(dict(name=service_name, location=location))
-            self.services.append(service)
+            self.services[service_name] = service
             logger.info("register(%r, %r)" % (service_name, location))
         else:
             service.touch()
@@ -137,7 +138,12 @@ class ServiceLocator (Component):
     def get_services (self, specs):
         """Query interface "Get" method."""
         logger.info("get_services(%r)" % (specs))
-        return self.services.Get(specs)
+        services = self.services.q_get(specs)
+        fields = sets.Set()
+        for spec in specs:
+            for field in spec.keys():
+                fields.add(field)
+        return [service.to_rx(fields) for service in services]
     get_services = exposed(get_services)
 
 
@@ -159,7 +165,7 @@ class PollingServiceLocator (ServiceLocator):
         Arguments:
         services -- list of services to check (default: all registered)
         """
-        for service in self.services:
+        for service in self.services.values():
             try:
                 ServerProxy(self.service.location).ping()
             except socket.error, e:
@@ -204,7 +210,7 @@ class TimingServiceLocator (ServiceLocator):
         services -- list of services to check (default: all registered)
         """
         now = time.time()
-        for service in self.services:
+        for service in self.services.values():
             if now - service.stamp > self.expire:
                 logger.warn("%s expired" % (service.name))
                 self.unregister(service.name)

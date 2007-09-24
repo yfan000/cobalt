@@ -41,6 +41,19 @@ class TestServiceLocator (object):
         self.slp.unregister("foo_service")
         location = self.slp.locate("foo_service")
         assert location == ""
+    
+    def test_get_services (self):
+        services = self.slp.get_services([{'name':"foo_service"}])
+        assert len(services) == 0
+        self.slp.register("foo_service", "http://localhost:5900")
+        services = self.slp.get_services([{'name':"foo_service"}])
+        assert len(services) == 1
+        assert services[0]['name'] == "foo_service"
+        assert "location" not in services[0]
+        services = self.slp.get_services([{'name':"*", 'location':"*"}])
+        assert len(services) == 1
+        assert services[0]['name'] == "foo_service"
+        assert services[0]['location'] == "http://localhost:5900"
 
 
 class TestPollingServiceLocator (TestServiceLocator):
