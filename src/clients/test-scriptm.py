@@ -1,17 +1,19 @@
 #!/usr/bin/env python
 
-'''Cobalt queue delete'''
-__revision__ = ''
+'''simple interaction with the script manager for testing'''
+__revision__ = '$Revision: '
 __version__ = '$Version$'
 
 import getopt, os, pwd, sys, time
-import Cobalt.Logging, Cobalt.Proxy, Cobalt.Util
+import Cobalt.Logging, Cobalt.Util
+from Cobalt.Proxy import ComponentProxy, ComponentLookupError
 
-usehelp = "Usage:\nzzzz [--version] <executable>"
+
+usehelp = "Usage:\ntest-scriptm [--version] <executable>"
 
 if __name__ == '__main__':
     if '--version' in sys.argv:
-        print "zzzz %s" % __revision__
+        print "test-scriptm %s" % __revision__
         print "cobalt %s" % __version__
         raise SystemExit, 0
     try:
@@ -28,10 +30,10 @@ if __name__ == '__main__':
     if '-d' in sys.argv:
         level = 10
     user = pwd.getpwuid(os.getuid())[0]
-    Cobalt.Logging.setup_logging('cqdel', to_syslog=False, level=level)
+    Cobalt.Logging.setup_logging('scriptm', to_syslog=False, level=level)
     try:
-        sm = Cobalt.Proxy.script_manager()
-    except Cobalt.Proxy.CobaltComponentError:
+        sm = ComponentProxy("script-manager")
+    except ComponentLookupError:
         print "Failed to connect to script manager"
         raise SystemExit, 1
     
