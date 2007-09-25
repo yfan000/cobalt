@@ -41,7 +41,7 @@ from Cobalt.Components.base import Component, exposed, automatic
 from Cobalt.Server import XMLRPCServer, find_intended_location
 
 
-logger = logging.getLogger("cobalt.components.slp")
+logger = logging.getLogger("Cobalt.Components.slp")
 
 
 __all__ = [

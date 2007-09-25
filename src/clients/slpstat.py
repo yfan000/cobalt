@@ -9,6 +9,7 @@ from Cobalt.Util import print_tabular
 import sys
 import time
 import xmlrpclib
+import socket
 
 import Cobalt.Logging
 from Cobalt.Proxy import ComponentProxy
@@ -18,7 +19,7 @@ if __name__ == '__main__':
     if '--version' in sys.argv:
         print "slpstat %s" % __revision__
         print "cobalt %s" % __version__
-        raise SystemExit, 0
+        sys.exit()
     
     if '-d' in sys.argv:
         level = 10
@@ -31,9 +32,11 @@ if __name__ == '__main__':
     except ComponentLookupError:
         print >> sys.stderr, "unable to find service-location"
         sys.exit(1)
-    
     try:
         services = slp.get_services([{'tag':'service', 'name':'*', 'stamp':'*', 'location':'*'}])
+    except socket.error, e:
+        print >> sys.stderr, "unable to connect to service-locator (%s)" % (e)
+        sys.exit(1)
     except xmlrpclib.Fault, e:
         print >> sys.stderr, "RPC fault (%s)" % (e)
         sys.exit(1)
