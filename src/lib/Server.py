@@ -274,9 +274,6 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
         self.register = register
         self.register_introspection_functions()
         self.register_function(self.ping)
-        
-        if self.register:
-            ComponentProxy("service-location").register(self.instance.name, self.url)
     
     def server_close (self):
         TCPServer.server_close(self)
@@ -359,6 +356,8 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
         #sigterm = signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
         try:
             while self.serve:
+                if self.register:
+                    ComponentProxy("service-location").register(self.instance.name, self.url)
                 try:
                     self.handle_request()
                 except socket.timeout:
