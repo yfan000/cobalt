@@ -7,7 +7,7 @@ TimingServiceLocator -- timeout-based
 
 The service-location component provides registration and lookup functions
 to store the locations of dynamically addressed xmlrpc servers. It is used
-directly by ComponentProxy to connect to components who's service location
+directly by ComponentProxy to connect to components whose service location
 is not configured statically locally.
 
 This module currently provides three implementations of service-location:
@@ -22,7 +22,7 @@ polling all registered services by calling their "ping" methods. This
 verifies that (a) the component is serving at the specified location, and
 (b) the component is responding.
 
-TimingServiceLocator extends teh generic implementation by aotomatically
+TimingServiceLocator extends the generic implementation by aotomatically
 expiring any service that has not registered in a given timeframe (specified
 at initialization with the "expire" keyword argument). Services are expected
 to register themselves regularly at an interval <= that timeframe.
@@ -91,7 +91,7 @@ class ServiceLocator (Component):
         """Register the availability of a service.
         
         Arguments:
-        service -- name of the service to register
+        service_name -- name of the service to register
         location -- location of the service
         """
         try:
@@ -109,7 +109,7 @@ class ServiceLocator (Component):
         """Remove a service from the registry.
         
         Arguments:
-        service -- name of the service to remove
+        service_name -- name of the service to remove
         """
         try:
             del self.services[service_name]
@@ -123,7 +123,7 @@ class ServiceLocator (Component):
         """Retrieve the location for a service.
         
         Arguments:
-        service -- name of the service to look up
+        service_name -- name of the service to look up
         """
         try:
             service = self.services[service_name]
@@ -198,9 +198,6 @@ class TimingServiceLocator (ServiceLocator):
         """Check each service timestamp.
         
         Unregister expired services.
-        
-        Arguments:
-        services -- list of services to check (default: all registered)
         """
         now = time.time()
         for service in self.services.values():
