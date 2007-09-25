@@ -32,11 +32,10 @@ import logging
 import sys
 import socket
 import time
-import sets
 from xmlrpclib import ServerProxy
 
 import Cobalt.Logging
-from Cobalt.Data import Data, DataDict
+from Cobalt.Data import Data, DataDict, get_spec_fields
 from Cobalt.Components.base import Component, exposed, automatic
 from Cobalt.Server import XMLRPCServer, find_intended_location
 
@@ -139,10 +138,7 @@ class ServiceLocator (Component):
         """Query interface "Get" method."""
         logger.info("get_services(%r)" % (specs))
         services = self.services.q_get(specs)
-        fields = sets.Set()
-        for spec in specs:
-            for field in spec.keys():
-                fields.add(field)
+        fields = get_spec_fields(specs)
         return [service.to_rx(fields) for service in services]
     get_services = exposed(get_services)
 

@@ -8,6 +8,15 @@ import sets
 import Cobalt.Util
 
 
+def get_spec_fields (specs):
+    """Given a list of specs, return the set of all fields used."""
+    fields = sets.Set()
+    for spec in specs:
+        for field in spec.keys():
+            fields.add(field)
+    return fields
+
+
 class DataCreationError(Exception):
     '''Used when a new object cannot be created'''
     pass
