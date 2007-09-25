@@ -157,9 +157,6 @@ class PollingServiceLocator (ServiceLocator):
         """Ping each service to check its availability.
         
         Unregister unresponsive services.
-        
-        Arguments:
-        services -- list of services to check (default: all registered)
         """
         for service in self.services.values():
             try:
