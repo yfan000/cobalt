@@ -98,7 +98,8 @@ class Data (object):
         """
         
         for field, value in self.fields.iteritems():
-            setattr(self, field, value)
+            if not hasattr(self, field):
+                setattr(self, field, value)
         
         if spec is not None:
             self.update(spec)
@@ -209,6 +210,8 @@ class DataList (list):
     q_del -- remove items from the list
     """
     
+    item_cls = None
+    
     def q_add (self, specs, callback=None, cargs={}):
         """Construct new items of type self.item_cls in the list.
         
@@ -275,6 +278,9 @@ class DataDict (dict):
     q_get -- retrieve items from the dict
     q_del -- remove items from the dict
     """
+    
+    item_cls = None
+    key = None
     
     def q_add (self, specs, callback=None, cargs={}):
         """Construct new items of type self.item_cls in the dict.

@@ -39,7 +39,7 @@ def run (argv=None):
             pidfile = item[1]
     
     slp = TimingServiceLocator()
-    location = find_intended_location(slp)
+    location = find_intended_location(slp, config_files=[configfile])
     server = XMLRPCServer(location, timeout=10, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key", register=False)
     server.register_instance(slp)
     if daemon:
@@ -50,7 +50,8 @@ def run (argv=None):
         finally:
             server.server_close()
 
-try:
-    run()
-except KeyboardInterrupt:
-    pass
+if __name__ == "__main__":
+    try:
+        run()
+    except KeyboardInterrupt:
+        pass
