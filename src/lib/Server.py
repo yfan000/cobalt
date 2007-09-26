@@ -302,13 +302,31 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         self.register = register
         self.register_introspection_functions()
         self.register_function(self.ping)
+    
+    def register_instance (self, *args, **kwargs):
+        SimpleXMLRPCDispatcher.register_instance(self, *args, **kwargs)
+        self.register_self()
+    
+    def register_self (self):
         if self.register:
-            ComponentProxy("service-location").register(self.instance.name, self.url)
+            try:
+                name = self.instance.name
+            except AttributeError:
+                name = "unknown"
+            ComponentProxy("service-location").register(name, self.url)
+    
+    def unregister_self (self):
+        if self.unregister:
+            try:
+                name = self.instance.name
+            except AttributeError:
+                return
+            ComponentProxy("service-location").register(name)
     
     def server_close (self):
         TCPServer.server_close(self)
         if self.register:
-            ComponentProxy("service-location").unregister(self.instance.name)
+            self.unregister_self()
     
     def _get_require_auth (self):
         return getattr(self.RequestHandlerClass, "require_auth", False)
@@ -370,7 +388,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
                 if self.instance and hasattr(self.instance, "do_tasks"):
                     self.instance.do_tasks()
                 if self.register:
-                    ComponentProxy("service-location").register(self.instance.name, self.url)
+                    self.register_self()
         finally:
             pass
             #signal.signal(signal.SIGINT, sigint)
