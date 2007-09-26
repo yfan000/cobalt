@@ -137,3 +137,43 @@ class Component (object):
         """The implementation of the component."""
         return self.implementation
     get_implementation = exposed(get_implementation)
+    
+    def run (self, argv=None, register=False):
+        import getopt
+        import sys
+        from Cobalt.Server import XMLRPCServer, find_intended_location
+
+        if argv is None:
+            argv = sys.argv
+        try:
+            (opts, arg) = getopt.getopt(argv[1:], 'C:D:')
+        except getopt.GetoptError, e:
+            print e
+            print "Usage:"
+            print "<component>.py [-D pidfile] [-C config file]"
+            sys.exit(1)
+        
+        # default settings
+        configfile = "/etc/cobalt.conf"
+        daemon = False
+        pidfile = ""
+        
+        # get user input
+        for item in opts:
+            if item[0] == '-C':
+                configfile = item[1]
+            elif item[0] == '-D':
+                daemon = True
+                pidfile = item[1]
+        
+        location = find_intended_location(self)
+        server = XMLRPCServer(location, self, timeout=10, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key", register=register)
+        # server.register_instance(self)
+        if daemon:
+            server.serve_daemon(pidfile=pidfile)
+        else:
+            try:
+                server.serve_forever()
+            finally:
+                server.server_close()
+    
