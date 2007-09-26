@@ -70,6 +70,38 @@ class TLSConnection (tlslite.api.TLSConnection):
 tlslite.integration.TLSSocketServerMixIn.TLSConnection = TLSConnection
 
 
+if sys.version_info[0] < 2 or (sys.version_info[0] == 2 and sys.version_info[1] < 5):
+    class SimpleXMLRPCDispatcher (SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
+        
+        def __init__ (self, allow_none, encoding):
+            SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self)
+            self.allow_none = allow_none
+            self.encoding = encoding
+        
+        def _marshaled_dispatch (self, data, dispatch_method=None):
+            try:
+                params, method = xmlrpclib.loads(data)
+                if dispatch_method is not None:
+                    response = dispatch_method(method, params)
+                else:
+                    response = self._dispatch(method, params)
+                response = (response,)
+                response = xmlrpclib.dumps(response, methodresponse=1,
+                    allow_none=self.allow_none, encoding=self.encoding)
+            except xmlrpclib.Fault, fault:
+                response = xmlrpclib.dumps(fault,
+                    allow_none=self.allow_none, encoding=self.encoding)
+            except:
+                # report exception back to server
+                response = xmlrpclib.dumps(
+                    xmlrpclib.Fault(1, "%s:%s" % (sys.exc_type, sys.exc_value)),
+                    allow_none=self.allow_none, encoding=self.encoding)
+            return response
+    
+else:
+    SimpleXMLRPCDispatcher = SimpleXMLRPCServer.SimpleXMLRPCDispatcher
+
+
 class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer, object):
     
     """TCP server supporting SSL encryption.
@@ -215,7 +247,7 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
         return True
 
 
-class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object):
+class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
     
     """Component XMLRPCServer.
     
@@ -256,12 +288,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
         encoding -- encoding to use for xml-rpc (default UTF-8)
         """
         
-        try:
-            SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self, allow_none, encoding)
-        except TypeError:
-            SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self)
-            self.allow_none = allow_none
-            self.encoding = encoding
+        SimpleXMLRPCDispatcher.__init__(self, allow_none, encoding)
         
         if not RequestHandlerClass:
             class RequestHandlerClass (XMLRPCRequestHandler):
@@ -282,29 +309,6 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
         TCPServer.server_close(self)
         if self.register:
             ComponentProxy("service-location").unregister(self.instance.name)
-    
-    # support Python 2.5-style marshaled dispatch in Python < 2.5
-    if sys.version_info[0] < 2 or (sys.version_info[0] == 2 and sys.version_info[1] < 5):
-        def _marshaled_dispatch (self, data, dispatch_method=None):
-            __doc__ = SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__doc__
-            try:
-                params, method = xmlrpclib.loads(data)
-                if dispatch_method is not None:
-                    response = dispatch_method(method, params)
-                else:
-                    response = self._dispatch(method, params)
-                response = (response,)
-                response = xmlrpclib.dumps(response, methodresponse=1,
-                    allow_none=self.allow_none, encoding=self.encoding)
-            except xmlrpclib.Fault, fault:
-                response = xmlrpclib.dumps(fault,
-                    allow_none=self.allow_none, encoding=self.encoding)
-            except:
-                # report exception back to server
-                response = xmlrpclib.dumps(
-                    xmlrpclib.Fault(1, "%s:%s" % (sys.exc_type, sys.exc_value)),
-                    allow_none=self.allow_none, encoding=self.encoding)
-            return response
     
     def _get_require_auth (self):
         return getattr(self.RequestHandlerClass, "require_auth", False)
