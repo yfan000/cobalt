@@ -9,6 +9,7 @@ __all__ = [
 
 import sys
 import os
+import xmlrpclib
 import socket
 import SocketServer
 import SimpleXMLRPCServer
@@ -295,7 +296,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCServer.SimpleXMLRPCDispatcher, object
                 response = (response,)
                 response = xmlrpclib.dumps(response, methodresponse=1,
                     allow_none=self.allow_none, encoding=self.encoding)
-            except Fault, fault:
+            except xmlrpclib.Fault, fault:
                 response = xmlrpclib.dumps(fault,
                     allow_none=self.allow_none, encoding=self.encoding)
             except:
