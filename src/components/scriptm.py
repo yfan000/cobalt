@@ -3,6 +3,7 @@
 __revision__ = '$Revision: $'
 
 import logging
+
 import Cobalt.Logging
 from Cobalt.Components.scriptm import ScriptManager
 
