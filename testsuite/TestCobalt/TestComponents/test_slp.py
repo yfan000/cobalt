@@ -85,8 +85,8 @@ class TestTimingServiceLocator (TestServiceLocator):
         assert time.time() < start + 2
         location = self.slp.locate("foo_service")
         assert location == "http://localhost:5900"
-        time.sleep(2.1)
-        assert (time.time() - start) >= 2.0
+        time.sleep(3)
+        assert (time.time() - start) > 2
         self.slp.expire_services()
         location = self.slp.locate("foo_service")
         assert location == ""
