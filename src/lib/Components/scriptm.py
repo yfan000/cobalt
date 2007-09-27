@@ -111,8 +111,11 @@ class ProcessGroupList(DataList):
 class ScriptManager(Component):
     '''The ScriptManager supports the running of scripts on a BG machine'''
     name = 'script-manager'
-    __object__ = ProcessGroup
-    __id__ = Cobalt.Data.IncrID()
+
+    # A default logger for the class is placed here.
+    # Assigning an instance-level logger is supported,
+    # and expected in the case of multiple instances.
+    logger = logging.getLogger("Cobalt.Components.ScriptManager")
 
     def __init__ (self, *args, **kwargs):
         """Initialize a new ServiceLocator.
@@ -145,21 +148,25 @@ class ScriptManager(Component):
 
     def createProcessGroup(self, data):
         '''Create new process group element'''
+        self.logger.info("creating process group %r" % data)
         return self.pgroups.q_add(data)
     createProcessGroup = exposed(createProcessGroup)
     
     def getProcessGroup(self, data):
         '''query existing process group'''
+        self.logger.info("querying for process group %r" % data)
         return self.pgroups.q_get(data)
     getProcessGroup = exposed(getProcessGroup)
 
     def waitProcessGroup(self, data):
         '''Remove completed process group'''
+        self.logger.info("removing process group %r" % data)
         return self.pgroups.q_del(data)
     waitProcessGroup = exposed(waitProcessGroup)
 
     def signalProcessGroup(self, data, sig):
         '''signal existing process group with specified signal'''
+        self.logger.info("signaling process group %r with signal %r" % (data, sig))
         for pg in self.pgroups:
             if pg.pgid == data['pgid']:
                 return pg.Signal(sig)
@@ -169,6 +176,7 @@ class ScriptManager(Component):
 
     def killProcessGroup(self, data):
         '''kill existing process group'''
+        self.logger.info("killing process group %r" % data)
         return self.signalProcessGroup(address, data, 'SIGINT')
     killProcessGroup = exposed(killProcessGroup)
     
