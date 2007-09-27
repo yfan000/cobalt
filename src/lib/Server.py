@@ -321,7 +321,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
                 name = self.instance.name
             except AttributeError:
                 return
-            ComponentProxy("service-location").register(name)
+            ComponentProxy("service-location").unregister(name)
     
     def server_close (self):
         TCPServer.server_close(self)
