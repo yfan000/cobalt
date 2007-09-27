@@ -316,7 +316,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
             ComponentProxy("service-location").register(name, self.url)
     
     def unregister_self (self):
-        if self.unregister:
+        if self.register:
             try:
                 name = self.instance.name
             except AttributeError:
