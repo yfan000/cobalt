@@ -103,8 +103,6 @@ class ServiceLocator (Component):
         else:
             service.touch()
             logger.info("register(%r, %r) [update]" % (service_name, location))
-            
-        return True
     register = exposed(register)
     
     def unregister (self, service_name):
@@ -119,7 +117,6 @@ class ServiceLocator (Component):
             logger.info("unregister(%r) [not registered]" % (service_name))
         else:
             logger.info("unregister(%r)" % (service_name))
-        return True
     unregister = exposed(unregister)
     
     def locate (self, service_name):
