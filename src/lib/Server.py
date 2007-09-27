@@ -16,6 +16,7 @@ import SimpleXMLRPCServer
 import base64
 import signal
 from ConfigParser import SafeConfigParser, NoSectionError, NoOptionError
+import logging
 import urlparse
 
 import tlslite.integration.TLSSocketServerMixIn
@@ -267,6 +268,8 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
     credentials -- valid credentials being used for authentication
     """
     
+    logger = logging.getLogger("Cobalt.Server.XMLRPCServer")
+    
     def __init__ (self, server_address, RequestHandlerClass=None,
                   keyfile=None, certfile=None,
                   timeout=10,
@@ -302,31 +305,39 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         self.register = register
         self.register_introspection_functions()
         self.register_function(self.ping)
+        self.logger.info("service available at %s" % self.url)
     
-    def register_instance (self, *args, **kwargs):
-        SimpleXMLRPCDispatcher.register_instance(self, *args, **kwargs)
-        self.register_self()
+    def register_instance (self, instance, *args, **kwargs):
+        SimpleXMLRPCDispatcher.register_instance(self, instance, *args, **kwargs)
+        if self.register:
+            self.register_self()
+        try:
+            name = instance.name
+        except AttributeError:
+            name = "unknown"
+        self.logger.info("serving %s at %s" % (name, self.url))
     
     def register_self (self):
-        if self.register:
-            try:
-                name = self.instance.name
-            except AttributeError:
-                name = "unknown"
-            ComponentProxy("service-location").register(name, self.url)
+        try:
+            name = self.instance.name
+        except AttributeError:
+            name = "unknown"
+        ComponentProxy("service-location").register(name, self.url)
+        self.logger.info("notified service-location [register]")
     
     def unregister_self (self):
-        if self.register:
-            try:
-                name = self.instance.name
-            except AttributeError:
-                return
-            ComponentProxy("service-location").unregister(name)
+        try:
+            name = self.instance.name
+        except AttributeError:
+            return
+        ComponentProxy("service-location").unregister(name)
+        self.logger.info("notified service-location [unregister]")
     
     def server_close (self):
         TCPServer.server_close(self)
         if self.register:
             self.unregister_self()
+        self.logger.info("server closed")
     
     def _get_require_auth (self):
         return getattr(self.RequestHandlerClass, "require_auth", False)
@@ -370,6 +381,8 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         print >> pidfile, os.getpid()
         pidfile.close()
         
+        self.logger.info("daemon at %s" % (os.getpid()))
+        
         self.serve_forever()
         self.server_close()
         os._exit(0)
@@ -377,6 +390,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
     def serve_forever (self):
         """Serve single requests until (self.serve == False)."""
         self.serve = True
+        self.logger.info("start handling requests")
         #sigint = signal.signal(signal.SIGINT, self._handle_shutdown_signal)
         #sigterm = signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
         try:
@@ -390,17 +404,18 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
                 if self.register:
                     self.register_self()
         finally:
-            pass
             #signal.signal(signal.SIGINT, sigint)
             #signal.signal(signal.SIGTERM, sigterm)
+            self.logger.info("stop handling requests")
     
     def shutdown (self):
         """Signal that automatic service should stop."""
         self.serve = False
     
     def _handle_shutdown_signal (self, signum, frame):
-        self.shutdown = True
+        self.shutdown()
     
     def ping (self, *args):
         """Echo response."""
+        self.logger.info("ping(%s)" % (", ".join([repr(arg) for arg in args])))
         return args

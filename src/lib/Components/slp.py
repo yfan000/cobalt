@@ -40,9 +40,6 @@ from Cobalt.Components.base import Component, exposed, automatic
 from Cobalt.Server import XMLRPCServer, find_intended_location
 
 
-logger = logging.getLogger("Cobalt.Components.slp")
-
-
 __all__ = [
     "ServiceLocator", "PollingServiceLocator", "TimingServiceLocator",
 ]
@@ -79,6 +76,11 @@ class ServiceLocator (Component):
     
     name = "service-location"
     
+    # A default logger for the class is placed here.
+    # Assigning an instance-level logger is supported,
+    # and expected in the case of multiple instances.
+    logger = logging.getLogger("Cobalt.Components.ServiceLocator")
+    
     def __init__ (self, *args, **kwargs):
         """Initialize a new ServiceLocator.
         
@@ -99,10 +101,10 @@ class ServiceLocator (Component):
         except KeyError:
             service = Service(dict(name=service_name, location=location))
             self.services[service_name] = service
-            logger.info("register(%r, %r)" % (service_name, location))
+            self.logger.info("register(%r, %r)" % (service_name, location))
         else:
             service.touch()
-            logger.info("register(%r, %r) [update]" % (service_name, location))
+            self.logger.info("register(%r, %r) [update]" % (service_name, location))
     register = exposed(register)
     
     def unregister (self, service_name):
@@ -114,9 +116,9 @@ class ServiceLocator (Component):
         try:
             del self.services[service_name]
         except KeyError:
-            logger.info("unregister(%r) [not registered]" % (service_name))
+            self.logger.info("unregister(%r) [not registered]" % (service_name))
         else:
-            logger.info("unregister(%r)" % (service_name))
+            self.logger.info("unregister(%r)" % (service_name))
     unregister = exposed(unregister)
     
     def locate (self, service_name):
@@ -128,15 +130,15 @@ class ServiceLocator (Component):
         try:
             service = self.services[service_name]
         except KeyError:
-            logger.info("locate(%r) [not registered]" % (service_name))
+            self.logger.info("locate(%r) [not registered]" % (service_name))
             return ""
-        logger.info("locate(%r) [%r]" % (service_name, service.location))
+        self.logger.info("locate(%r) [%r]" % (service_name, service.location))
         return service.location
     locate = exposed(locate)
     
     def get_services (self, specs):
         """Query interface "Get" method."""
-        logger.info("get_services(%r)" % (specs))
+        self.logger.info("get_services(%r)" % (specs))
         services = self.services.q_get(specs)
         fields = get_spec_fields(specs)
         return [service.to_rx(fields) for service in services]
@@ -151,7 +153,9 @@ class PollingServiceLocator (ServiceLocator):
     check_services -- ping services (automatic)
     """
     
-    implementation = "active"
+    implementation = "polling"
+    
+    logger = logging.getLogger("Cobalt.Components.PollingServiceLocator")
     
     def check_services (self):
         """Ping each service to check its availability.
@@ -162,10 +166,10 @@ class PollingServiceLocator (ServiceLocator):
             try:
                 ServerProxy(self.service.location).ping()
             except socket.error, e:
-                logger.warn("unable to contact %s [%s]" % (service.name, e))
+                self.logger.warn("unable to contact %s [%s]" % (service.name, e))
                 self.unregister(service.name)
             except Exception, e:
-                logger.error("error in %s (%s)" % (service.name, e))
+                self.logger.error("error in %s (%s)" % (service.name, e))
                 self.unregister(service.name)
     check_services = automatic(check_services)
 
@@ -181,7 +185,9 @@ class TimingServiceLocator (ServiceLocator):
     expire_services -- check service timestamps (automatic)
     """
     
-    implementation = "passive"
+    implementation = "timing"
+    
+    logger = logging.getLogger("Cobalt.Components.TimingServiceLocator")
     
     def __init__ (self, expire=180, *args, **kwargs):
         """Initialize a TimingServiceLocator.
@@ -202,6 +208,6 @@ class TimingServiceLocator (ServiceLocator):
         now = time.time()
         for service in self.services.values():
             if now - service.stamp > self.expire:
-                logger.warn("%s expired" % (service.name))
+                self.logger.warn("%s expired" % (service.name))
                 self.unregister(service.name)
     expire_services = automatic(expire_services)

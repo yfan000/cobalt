@@ -2,14 +2,17 @@
 
 __revision__ = '$Revision$'
 
-__all__ = ["Component", "exposed", "automatic"]
+__all__ = ["Component", "exposed", "automatic", "run_component"]
 
 import inspect
+import os
 import cPickle
 import pydoc
 import sys
 import getopt
+import logging
 
+import Cobalt.Logging
 from Cobalt.Server import XMLRPCServer, find_intended_location
 
 def run_component (component, argv=None, register=False):
@@ -20,14 +23,13 @@ def run_component (component, argv=None, register=False):
     except getopt.GetoptError, e:
         print e
         print "Usage:"
-        print "slp.py [-D pidfile] [-C config file]"
+        print "%s [-D pidfile] [-C config file]" % (os.path.basename(argv[0]))
         sys.exit(1)
     
     # default settings
     configfile = "/etc/cobalt.conf"
     daemon = False
     pidfile = ""
-    
     # get user input
     for item in opts:
         if item[0] == '-C':
@@ -36,9 +38,15 @@ def run_component (component, argv=None, register=False):
             daemon = True
             pidfile = item[1]
     
+    component.logger.setLevel(logging.INFO)
+    Cobalt.Logging.log_to_stderr(component.logger)
+    
     location = find_intended_location(component, config_files=[configfile])
     server = XMLRPCServer(location, timeout=10, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key", register=register)
+    server.logger.setLevel(logging.INFO)
+    Cobalt.Logging.log_to_stderr(server.logger)
     server.register_instance(component)
+    
     if daemon:
         server.serve_daemon(pidfile=pidfile)
     else:
