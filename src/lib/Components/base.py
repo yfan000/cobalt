@@ -7,6 +7,46 @@ __all__ = ["Component", "exposed", "automatic"]
 import inspect
 import cPickle
 import pydoc
+import sys
+import getopt
+
+from Cobalt.Server import XMLRPCServer, find_intended_location
+
+def run_component (component, argv=None, register=False):
+    if argv is None:
+        argv = sys.argv
+    try:
+        (opts, arg) = getopt.getopt(argv[1:], 'C:D:')
+    except getopt.GetoptError, e:
+        print e
+        print "Usage:"
+        print "slp.py [-D pidfile] [-C config file]"
+        sys.exit(1)
+    
+    # default settings
+    configfile = "/etc/cobalt.conf"
+    daemon = False
+    pidfile = ""
+    
+    # get user input
+    for item in opts:
+        if item[0] == '-C':
+            configfile = item[1]
+        elif item[0] == '-D':
+            daemon = True
+            pidfile = item[1]
+    
+    location = find_intended_location(component, config_files=[configfile])
+    server = XMLRPCServer(location, timeout=10, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key", register=register)
+    server.register_instance(component)
+    if daemon:
+        server.serve_daemon(pidfile=pidfile)
+    else:
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
+
 
 def exposed (func):
     """Mark a method to be exposed publically.
