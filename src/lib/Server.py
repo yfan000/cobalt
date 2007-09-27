@@ -353,8 +353,11 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         self.RequestHandlerClass.require_auth = value
     require_auth = property(_get_require_auth, _set_require_auth)
     
-    def _get_credentials (self, dummy={}):
-        return getattr(self.RequestHandlerClass, "credentials", dummy)
+    def _get_credentials (self):
+        try:
+            return self.RequestHandlerClass.credentials
+        except AttributeError:
+            return dict()
     def _set_credentials (self, value):
         self.RequestHandlerClass.credentials = value
     credentials = property(_get_credentials, _set_credentials)
