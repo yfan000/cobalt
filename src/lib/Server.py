@@ -322,16 +322,24 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
             name = self.instance.name
         except AttributeError:
             name = "unknown"
-        ComponentProxy("service-location").register(name, self.url)
-        self.logger.info("notified service-location [register]")
+        try:
+            ComponentProxy("service-location").register(name, self.url)
+        except Exception, e:
+            self.logger.info("unable to notify service-location [%s]" % (e))
+        else:
+            self.logger.info("notified service-location [register]")
     
     def unregister_self (self):
         try:
             name = self.instance.name
         except AttributeError:
             return
-        ComponentProxy("service-location").unregister(name)
-        self.logger.info("notified service-location [unregister]")
+        try:
+            ComponentProxy("service-location").unregister(name)
+        except Exception, e:
+            self.logger.info("unable to notify service-location [%s]" % (e))
+        else:
+            self.logger.info("notified service-location [unregister]")
     
     def server_close (self):
         TCPServer.server_close(self)
