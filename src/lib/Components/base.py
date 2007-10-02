@@ -15,25 +15,25 @@ import logging
 import Cobalt.Logging
 from Cobalt.Server import XMLRPCServer, find_intended_location
 
-def run_component (component, argv=None, register=False):
+def run_component (component, argv=None, register=True):
     if argv is None:
         argv = sys.argv
     try:
         (opts, arg) = getopt.getopt(argv[1:], 'C:D:')
     except getopt.GetoptError, e:
-        print e
-        print "Usage:"
-        print "%s [-D pidfile] [-C config file]" % (os.path.basename(argv[0]))
+        print >> sys.stderr, e
+        print >> sys.stderr, "Usage:"
+        print >> sys.stderr, "%s [-D pidfile] [-C config file]" % (os.path.basename(argv[0]))
         sys.exit(1)
     
     # default settings
-    configfile = "/etc/cobalt.conf"
+    config_file = "/etc/cobalt.conf"
     daemon = False
     pidfile = ""
     # get user input
     for item in opts:
         if item[0] == '-C':
-            configfile = item[1]
+            config_file = item[1]
         elif item[0] == '-D':
             daemon = True
             pidfile = item[1]
@@ -41,8 +41,8 @@ def run_component (component, argv=None, register=False):
     component.logger.setLevel(logging.INFO)
     Cobalt.Logging.log_to_stderr(component.logger)
     
-    location = find_intended_location(component, config_files=[configfile])
-    server = XMLRPCServer(location, timeout=10, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key", register=register)
+    location = find_intended_location(component, config_files=[config_file])
+    server = XMLRPCServer(location, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key", register=register)
     server.logger.setLevel(logging.INFO)
     Cobalt.Logging.log_to_stderr(server.logger)
     server.register_instance(component)

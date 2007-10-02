@@ -10,6 +10,6 @@ from Cobalt.Components.base import run_component
 
 try:
     script_manager = ScriptManager()
-    run_component(script_manager, register=True)
+    run_component(script_manager)
 except KeyboardInterrupt:
     pass
