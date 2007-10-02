@@ -2,8 +2,6 @@
 
 __revision__ = '$Revision$'
 
-import logging
-
 from Cobalt.Components.slp import TimingServiceLocator
 from Cobalt.Components.base import run_component
 

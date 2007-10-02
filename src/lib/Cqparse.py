@@ -61,7 +61,7 @@ DEFAULT_DAYS = 3
 # # Get a logger for the main program
 # logger = logging.getLogger( "cqparse" )
 # logger.setLevel( logging.DEBUG )
-Cobalt.Logging.setup_logging('cqm', level=logging.INFO)
+#Cobalt.Logging.setup_logging('cqm', level=logging.INFO)
 logger = logging.getLogger('cqm')
 
 # ----------------------------------------------------------------------------
@@ -427,7 +427,7 @@ class CobaltLogParser(Cobalt.Data.DataSet):
         """
         Cobalt.Data.DataSet.__init__(self)
         self._jobs = {}
-        self.comms = Cobalt.Proxy.CommDict()
+        #self.comms = Cobalt.Proxy.CommDict()
     
     # ----------------------------------------
     # Generators
