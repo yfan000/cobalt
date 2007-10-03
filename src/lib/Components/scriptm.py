@@ -18,8 +18,8 @@ __revision__ = '$Revision: $'
 import logging, os, pwd, signal, sys, tempfile, time
 
 import Cobalt.Logging
-from Cobalt.Data import Data, DataList, get_spec_fields
-from Cobalt.Components.base import Component, exposed, automatic
+from Cobalt.Data import Data, DataList
+from Cobalt.Components.base import Component, exposed, automatic, query
 from Cobalt.Server import XMLRPCServer, find_intended_location
 
 class ProcessGroup(Data):
@@ -150,19 +150,19 @@ class ScriptManager(Component):
         '''Create new process group element'''
         self.logger.info("creating process group %r" % data)
         return self.pgroups.q_add(data)
-    createProcessGroup = exposed(createProcessGroup)
+    createProcessGroup = exposed(query(createProcessGroup))
     
     def getProcessGroup(self, data):
         '''query existing process group'''
         self.logger.info("querying for process group %r" % data)
         return self.pgroups.q_get(data)
-    getProcessGroup = exposed(getProcessGroup)
+    getProcessGroup = exposed(query(getProcessGroup))
 
     def waitProcessGroup(self, data):
         '''Remove completed process group'''
         self.logger.info("removing process group %r" % data)
         return self.pgroups.q_del(data)
-    waitProcessGroup = exposed(waitProcessGroup)
+    waitProcessGroup = exposed(query(waitProcessGroup))
 
     def signalProcessGroup(self, data, sig):
         '''signal existing process group with specified signal'''

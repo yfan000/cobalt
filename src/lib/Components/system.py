@@ -24,8 +24,8 @@ from ConfigParser import ConfigParser
 import lxml
 import lxml.etree
 
-from Cobalt.Data import Data, DataDict, get_spec_fields
-from Cobalt.Components.base import Component, exposed, automatic
+from Cobalt.Data import Data, DataDict
+from Cobalt.Components.base import Component, exposed, automatic, query
 
 __all__ = [
     "JobCreationError",
@@ -257,9 +257,8 @@ class Simulator (Component):
     def get_partitions (self, specs):
         """Query partitions on simulator."""
         partitions = self.partitions.q_get(specs)
-        fields = get_spec_fields(specs)
-        return [partition.to_rx(fields) for partition in partitions]
-    get_partitions = exposed(get_partitions)
+        return partitions
+    get_partitions = exposed(query(get_partitions))
     
     def reserve_partition (self, name, size=None):
         """Reserve a partition and block all related partitions.
@@ -410,18 +409,14 @@ class Simulator (Component):
     def get_jobs (self, specs):
         """Query jobs running on the simulator."""
         self.logger.info("get_jobs(%r)" % (specs))
-        fields = get_spec_fields(specs)
-        specs = [job.to_rx(fields) for job in self.jobs.q_get(specs)]
-        return specs
-    get_jobs = exposed(get_jobs)
+        return self.jobs.q_get(specs)
+    get_jobs = exposed(query(get_jobs))
     
     def del_jobs (self, specs):
         """Delete jobs running on the simulator."""
         self.logger.info("del_jobs(%r)" % (specs))
-        fields = get_spec_fields(specs)
-        specs = [job.to_rx(fields) for job in self.jobs.q_del(specs)]
-        return specs
-    del_jobs = exposed(del_jobs)
+        return self.jobs.q_del(specs)
+    del_jobs = exposed(query(del_jobs))
     
     def run_jobs (self):
         """Run all jobs on the simulator.

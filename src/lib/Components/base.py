@@ -14,6 +14,7 @@ import logging
 
 import Cobalt.Logging
 from Cobalt.Server import XMLRPCServer, find_intended_location
+from Cobalt.Data import get_spec_fields
 
 def run_component (component, argv=None, register=True):
     if argv is None:
@@ -77,6 +78,45 @@ def automatic (func):
     """Mark a method to be run continually."""
     func.automatic = True
     return func
+
+def query_method (func):
+    
+    """Wrap a method with query marshaling.
+    
+    Pass-through automatic/exposed decorator values.
+    """
+    
+    def query_wrapper (obj, specs, *args, **kwargs):
+        items = func(obj, specs, *args, **kwargs)
+        fields = get_spec_fields(specs)
+        return [item.to_rx(fields) for item in items]
+    
+    for attribute in ["exposed", "automatic"]:
+        if getattr(func, attribute, False):
+            setattr(query_wrapper, attribute)
+    
+    return query_wrapper
+
+def query_func (func):
+    
+    """Wrap a function with query marshaling.
+    
+    Pass-through automatic/exposed decorator values.
+    """
+    
+    def query_wrapper (specs, *args, **kwargs):
+        items = func(specs, *args, **kwargs)
+        fields = get_spec_fields(specs)
+        return [item.to_rx(fields) for item in items]
+    
+    for attribute in ["exposed", "automatic"]:
+        if getattr(func, attribute, False):
+            setattr(query_wrapper, attribute)
+    
+    return query_wrapper
+
+# assume default query implementation is as a method
+query = query_method
 
 
 class NoExposedMethod (Exception):

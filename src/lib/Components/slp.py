@@ -35,9 +35,9 @@ import time
 from xmlrpclib import ServerProxy
 
 import Cobalt.Logging
-from Cobalt.Data import Data, DataDict, get_spec_fields
-from Cobalt.Components.base import Component, exposed, automatic
-from Cobalt.Server import XMLRPCServer, find_intended_location
+from Cobalt.Data import Data, DataDict
+from Cobalt.Components.base import Component, exposed, automatic, query
+from Cobalt.Server import XMLRPCServer
 
 
 __all__ = [
@@ -139,10 +139,8 @@ class ServiceLocator (Component):
     def get_services (self, specs):
         """Query interface "Get" method."""
         self.logger.info("get_services(%r)" % (specs))
-        services = self.services.q_get(specs)
-        fields = get_spec_fields(specs)
-        return [service.to_rx(fields) for service in services]
-    get_services = exposed(get_services)
+        return self.services.q_get(specs)
+    get_services = exposed(query(get_services))
 
 
 class PollingServiceLocator (ServiceLocator):
