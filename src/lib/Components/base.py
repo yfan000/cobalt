@@ -12,6 +12,7 @@ import sys
 import getopt
 import logging
 
+import Cobalt.Proxy
 import Cobalt.Logging
 from Cobalt.Server import XMLRPCServer, find_intended_location
 from Cobalt.Data import get_spec_fields
@@ -79,45 +80,17 @@ def automatic (func):
     func.automatic = True
     return func
 
-def query_method (func):
-    
-    """Wrap a method with query marshaling.
-    
-    Pass-through automatic/exposed decorator values.
-    """
-    
-    def query_wrapper (obj, specs, *args, **kwargs):
-        items = func(obj, specs, *args, **kwargs)
+def query (func):
+    """Mark a method to be marshalled as a query."""
+    func.query = True
+    return func
+
+def marshal_query_result (items, specs=None):
+    if specs is not None:
         fields = get_spec_fields(specs)
-        return [item.to_rx(fields) for item in items]
-    
-    for attribute in ["exposed", "automatic"]:
-        if getattr(func, attribute, False):
-            setattr(query_wrapper, attribute)
-    
-    return query_wrapper
-
-def query_func (func):
-    
-    """Wrap a function with query marshaling.
-    
-    Pass-through automatic/exposed decorator values.
-    """
-    
-    def query_wrapper (specs, *args, **kwargs):
-        items = func(specs, *args, **kwargs)
-        fields = get_spec_fields(specs)
-        return [item.to_rx(fields) for item in items]
-    
-    for attribute in ["exposed", "automatic"]:
-        if getattr(func, attribute, False):
-            setattr(query_wrapper, attribute)
-    
-    return query_wrapper
-
-# assume default query implementation is as a method
-query = query_method
-
+    else:
+        fields = None
+    return [item.to_rx(fields) for item in items]
 
 class NoExposedMethod (Exception):
     """There is no method exposed with the given name."""
@@ -144,13 +117,15 @@ class Component (object):
     name = "component"
     implementation = "generic"
     
-    def __init__ (self, statefile=None):
+    def __init__ (self, **kwargs):
         """Initialize a new component.
         
         Keyword arguments:
         statefile -- file in which to save state automatically
         """
-        self.statefile = statefile
+        self.statefile = kwargs.get("statefile", None)
+        if kwargs.get("register", True):
+            Cobalt.Proxy.register_component(self)
         
     def save (self, statefile=None):
         """Pickle the component.
@@ -195,7 +170,10 @@ class Component (object):
         args -- tuple of paramaters to method
         """
         func = self._resolve_exposed_method(method)
-        return func(*args)
+        result = func(*args)
+        if getattr(func, "query", False):
+            result = marshal_query_result(result)
+        return result
     
     def _listMethods (self):
         """Custom XML-RPC introspective method list."""

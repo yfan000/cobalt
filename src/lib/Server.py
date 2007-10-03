@@ -310,14 +310,14 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
     def register_instance (self, instance, *args, **kwargs):
         SimpleXMLRPCDispatcher.register_instance(self, instance, *args, **kwargs)
         if self.register:
-            self.register_self()
+            self.register_with_slp()
         try:
             name = instance.name
         except AttributeError:
             name = "unknown"
         self.logger.info("serving %s at %s" % (name, self.url))
     
-    def register_self (self):
+    def register_with_slp (self):
         try:
             name = self.instance.name
         except AttributeError:
@@ -329,7 +329,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         else:
             self.logger.info("notified service-location [register]")
     
-    def unregister_self (self):
+    def unregister_with_slp (self):
         try:
             name = self.instance.name
         except AttributeError:
@@ -344,7 +344,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
     def server_close (self):
         TCPServer.server_close(self)
         if self.register:
-            self.unregister_self()
+            self.unregister_with_slp()
         self.logger.info("server closed")
     
     def _get_require_auth (self):
@@ -413,7 +413,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
                 if self.instance and hasattr(self.instance, "do_tasks"):
                     self.instance.do_tasks()
                 if self.register:
-                    self.register_self()
+                    self.register_with_slp()
         finally:
             #signal.signal(signal.SIGINT, sigint)
             #signal.signal(signal.SIGTERM, sigterm)

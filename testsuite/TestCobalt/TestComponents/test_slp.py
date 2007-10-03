@@ -48,12 +48,11 @@ class TestServiceLocator (object):
         self.slp.register("foo_service", "http://localhost:5900")
         services = self.slp.get_services([{'name':"foo_service"}])
         assert len(services) == 1
-        assert services[0]['name'] == "foo_service"
-        assert "location" not in services[0]
+        assert services[0].name == "foo_service"
         services = self.slp.get_services([{'name':"*", 'location':"*"}])
         assert len(services) == 1
-        assert services[0]['name'] == "foo_service"
-        assert services[0]['location'] == "http://localhost:5900"
+        assert services[0].name == "foo_service"
+        assert services[0].location == "http://localhost:5900"
 
 
 class TestPollingServiceLocator (TestServiceLocator):

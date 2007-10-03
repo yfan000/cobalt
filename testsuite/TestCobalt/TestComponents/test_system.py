@@ -90,8 +90,9 @@ class TestSimulator (TestComponent):
             errorfile = "errfile",
             user = os.getlogin(),
         )])
-        specs = self.system.get_jobs([{'id':"*"}])
-        assert specs
+        jobs = self.system.get_jobs([{'id':"*"}])
+        assert jobs
+        specs = [job.to_rx(["id"]) for job in jobs]
         self.system.del_jobs(specs)
         specs = self.system.get_jobs([{'id':"*"}])
         assert not specs

@@ -13,11 +13,15 @@ from xmlrpclib import ServerProxy, Fault
 from ConfigParser import SafeConfigParser, NoSectionError, NoOptionError
 
 __all__ = [
-    "ComponentProxy", "ComponentLookupError", "find_configured_locations",
+    "ComponentProxy", "ComponentLookupError",
+    "register_component", "find_configured_servers",
 ]
 
+local_components = dict()
+known_servers = dict()
 
-known_components = dict()
+def register_component (component):
+    local_components[component.name] = component
 
 
 class ComponentLookupError (Exception):
@@ -38,8 +42,10 @@ def ComponentProxy (component_name, *args, **kwargs):
     
     Additional arguments are passed to the ServerProxy constructor.
     """
-    if component_name in known_components:
-        return ServerProxy(known_components[component_name], *args, **kwargs)
+    if component_name in local_components:
+        return LocalProxy(local_components[component_name])
+    elif component_name in known_servers:
+        return ServerProxy(known_servers[component_name], allow_none=True, *args, **kwargs)
     elif component_name != "service-location":
         try:
             slp = ComponentProxy("service-location")
@@ -47,22 +53,50 @@ def ComponentProxy (component_name, *args, **kwargs):
             raise ComponentLookupError(component_name)
         try:
             address = slp.locate(component_name)
-        except Fault:
+        except:
             raise ComponentLookupError(component_name)
         if not address:
             raise ComponentLookupError(component_name)
         return ServerProxy(address, *args, **kwargs)
     else:
         raise ComponentLookupError(component_name)
-                
 
-def find_configured_locations (config_files=None):
+
+class LocalProxy (object):
+    
+    """Proxy-like filter for inter-component communication.
+    
+    Used to access other components stored in local memory,
+    without having to transport across tcp/http.
+    
+    Dispatches method calls through the component's _dispatch
+    method to keep the interface between this and ServerProxy
+    consistent.
+    """
+    
+    def __init__ (self, component):
+        self._component = component
+    
+    def __getattr__ (self, attribute):
+        return LocalProxyMethod(self._component, attribute)
+
+
+class LocalProxyMethod (object):
+    
+    def __init__ (self, component, func_name):
+        self.component = component
+        self.func_name = func_name
+    
+    def __call__ (self, *args):
+        return self.component._dispatch(self.func_name, args)
+
+
+def find_configured_servers (config_files=None):
     """Read associated config files into the module.
     
     Arguments:
     config_files -- a list of paths to config files.
     """
-    global known_components
     if not config_files:
         config_files = ["/etc/cobalt.conf"]
     config = SafeConfigParser()
@@ -71,11 +105,12 @@ def find_configured_locations (config_files=None):
         components = config.options("components")
     except NoSectionError:
         return []
-    known_components = dict([
+    known_servers.clear()
+    known_servers.update(dict([
         (component, config.get("components", component))
         for component in components
-    ])
-    return known_components.copy()
+    ]))
+    return known_servers.copy()
 
 
-find_configured_locations()
+find_configured_servers()
