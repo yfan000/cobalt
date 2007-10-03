@@ -94,8 +94,8 @@ class TestSimulator (TestComponent):
         assert jobs
         specs = [job.to_rx(["id"]) for job in jobs]
         self.system.del_jobs(specs)
-        specs = self.system.get_jobs([{'id':"*"}])
-        assert not specs
+        jobs = self.system.get_jobs([{'id':"*"}])
+        assert not jobs
     
     def test_run_jobs (self):
         self.system.add_jobs([dict(

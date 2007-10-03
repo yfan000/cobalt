@@ -402,9 +402,8 @@ class Simulator (Component):
             return jobspec
         
         jobspecs = [jobspec(spec) for spec in specs]
-        specs = [job.to_rx() for job in self.jobs.q_add(jobspecs)]
-        return specs
-    add_jobs = exposed(add_jobs)
+        return self.jobs.q_add(jobspecs)
+    add_jobs = exposed(query(all_fields=True)(add_jobs))
     
     def get_jobs (self, specs):
         """Query jobs running on the simulator."""

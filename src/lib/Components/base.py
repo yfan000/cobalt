@@ -80,10 +80,16 @@ def automatic (func):
     func.automatic = True
     return func
 
-def query (func):
+def query (func=None, **kwargs):
     """Mark a method to be marshalled as a query."""
-    func.query = True
-    return func
+    def _query (func):
+        if kwargs.get("all_fields", True):
+            func.query_all_fields = True
+        func.query = True
+        return func
+    if func is not None:
+        return _query(func)
+    return _query
 
 def marshal_query_result (items, specs=None):
     if specs is not None:
@@ -172,7 +178,11 @@ class Component (object):
         func = self._resolve_exposed_method(method)
         result = func(*args)
         if getattr(func, "query", False):
-            result = marshal_query_result(result)
+            if not getattr(func, "query_all_methods", False):
+                margs = args[0:]
+            else:
+                margs = []
+            result = marshal_query_result(result, *margs)
         return result
     
     def _listMethods (self):
