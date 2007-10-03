@@ -1365,26 +1365,26 @@ class QueueManager(Component):
         return self.Queues.add_queues(specs)
     add_queues = exposed(add_queues)
     
-    def canQueue(self, job_spec):
+    def can_queue(self, job_spec):
         return self.Queues.canQueue(job_spec)
-    canQueue = exposed(canQueue)
+    can_queue = exposed(can_queue)
 
-    def setQueues(self, specs, updates):
+    def set_queues(self, specs, updates):
         def _setQueues(queue, newattr):
             queue.update(newattr)
         return self.Queues.get_queues(specs, _setQueues, updates)
-    setQueues = exposed(setQueues)
+    set_queues = exposed(set_queues)
         
 
-    def runJobs(self, specs, nodelist):
-        def _runJobs(job, nodes):
+    def run_jobs(self, specs, nodelist):
+        def _run_jobs(job, nodes):
             job.Run(nodes)
-        return self.Queues.get_queues(specs, _runJobs, nodelist)
-    runJobs = exposed(runJobs)
+        return self.Queues.get_queues(specs, _run_jobs, nodelist)
+    run_jobs = exposed(run_jobs)
 
-    def setJobs(self, specs, updates):
-        def _setJobs(job, newattr):
+    def set_jobs(self, specs, updates):
+        def _set_jobs(job, newattr):
             job.update(newattr)
-        return self.Queues.get_jobs(specs, _setJobs, updates)
-    setJobs = exposed(setJobs)
+        return self.Queues.get_jobs(specs, _set_jobs, updates)
+    set_jobs = exposed(set_jobs)
 

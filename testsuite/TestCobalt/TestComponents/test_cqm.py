@@ -72,16 +72,16 @@ class TestQueueManager(object):
         assert len(results) == 0
         
     
-    def test_setQueues(self):
+    def test_set_queues(self):
         self.cqm.add_queues([{'tag':"queue", 'name':"default"}])
          
-        self.cqm.setQueues([{'tag':"queue", 'name':"default"}], {'state':"bar"})
+        self.cqm.set_queues([{'tag':"queue", 'name':"default"}], {'state':"bar"})
         results = self.cqm.get_queues([{'tag':"queue", 'name':"default"}])
         assert results[0].state == 'bar'
 
         self.cqm.add_queues([{'tag':"queue", 'name':"foo"}])
         self.cqm.add_queues([{'tag':"queue", 'name':"bar"}])
-        self.cqm.setQueues([{'tag':"queue", 'name':"*"}], {'state':"bar"})
+        self.cqm.set_queues([{'tag':"queue", 'name':"*"}], {'state':"bar"})
         results = self.cqm.get_queues([{'tag':"queue", 'name':"*"}])
     
         assert results[0].state == results[1].state == results[2].state == 'bar'
@@ -146,17 +146,17 @@ class TestQueueManager(object):
         results = self.cqm.get_jobs([{'tag':"job", 'user':"wally"}])
         assert len(results) == 0
 
-    def test_setJobs(self):
+    def test_set_jobs(self):
         self.cqm.add_queues([{'tag':"queue", 'name':"default"}])
         self.cqm.add_queues([{'tag':"queue", 'name':"foo"}])
     
         self.cqm.add_jobs([{'tag':"job", 'queue':"default"}])
         self.cqm.add_jobs([{'tag':"job", 'queue':"foo"}])
         
-        self.cqm.setJobs([{'tag':"job", 'queue':"*"}], {'jobname':"hello"})
+        self.cqm.set_jobs([{'tag':"job", 'queue':"*"}], {'jobname':"hello"})
         results = self.cqm.get_jobs([{'tag':"job", 'jobname':"hello"}])
         assert len(results) == 2
         
-        self.cqm.setJobs([{'tag':"job", 'queue':"foo"}], {'jobname':"goodbye"})
+        self.cqm.set_jobs([{'tag':"job", 'queue':"foo"}], {'jobname':"goodbye"})
         results = self.cqm.get_jobs([{'tag':"job", 'jobname':"hello"}])
         assert len(results) == 1
