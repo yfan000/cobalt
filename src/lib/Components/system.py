@@ -1,34 +1,64 @@
-"""hardware abstraction layer for the system on which jobs are run"""
+"""Hardware abstraction layer for the system on which jobs are run.
+
+Classes:
+Partition -- atomic set of nodes
+PartitionDict -- default container for partitions
+Job -- virtual job running on the system
+JobDict -- default container for jobs
+Simulator -- simulated system component
+
+Exceptions:
+JobCreationError -- error when creating a job
+"""
 
 import pwd
-import atexit
 import sets
 import logging
 import sys
 import os
 import operator
-import signal
-import tempfile
+import random
+from datetime import datetime
 from ConfigParser import ConfigParser
 
 import lxml
 import lxml.etree
 
 from Cobalt.Data import Data, DataDict, get_spec_fields
-from Cobalt.Components.base import Component, exposed
+from Cobalt.Components.base import Component, exposed, automatic
 
 __all__ = [
-    "ProcessGroupCreationError",
+    "JobCreationError",
     "Partition", "PartitionDict",
-    "Brooklyn",
+    "Job", "JobDict",
+    "Simulator",
 ]
 
 
-class ProcessGroupCreationError (Exception):
-    """Not enough information is specified"""
+class JobCreationError (Exception):
+    """An error occured when creation a job."""
 
 
 class Partition (Data):
+    
+    """An atomic set of nodes.
+    
+    Partitions can be reserved to run jobs on.
+    
+    Attributes:
+    tag -- partition
+    scheduled -- ? (default False)
+    name -- canonical name
+    functional -- the partition is available for reservations
+    queue -- ?
+    parents -- super(containing)-partitions
+    children -- sub-partitions
+    size -- number of nodes in the partition
+    
+    Properties:
+    state -- "idle", "busy", or "blocked"
+    """
+    
     fields = Data.fields.copy()
     fields.update(dict(
         tag = "partition",
@@ -39,14 +69,14 @@ class Partition (Data):
         size = None,
         parents = None,
         children = None,
-        nodes = None,
         state = None,
     ))
     
     def __init__ (self, *args, **kwargs):
+        """Initialize a new partition."""
         self.parents = sets.Set()
         self.children = sets.Set()
-        self.nodes = sets.Set()
+        self._busy = False
         Data.__init__(self, *args, **kwargs)
     
     def __str__ (self):
@@ -56,96 +86,129 @@ class Partition (Data):
         return "<%s name=%r>" % (self.__class__.__name__, self.name)
     
     def _get_state (self):
-        busy_nodes = sets.Set([node for node in self.nodes if node.state == "busy"])
-        if not busy_nodes:
-            return "idle"
-        busy_parents = sets.Set([partition for partition in self.parents if partition.state == "busy"])
-        if not busy_parents:
-            if len(busy_nodes) == len(self.nodes):
-                return "busy"
-        return "blocked"
-    state = property(_get_state)
-
-
-class Node (Data):
+        for partition in self.parents | self.children:
+            if partition._busy:
+                return "blocked"
+        if self._busy:
+            return "busy"
+        return "idle"
     
-    fields = Data.fields.copy()
-    fields.update(dict(
-        tag = "nodecard",
-        bpid = None,
-        id = None,
-        queue = "default",
-        state = "idle",
-    ))
+    def _set_state (self, value):
+        if self.state == "blocked":
+            raise ValueError("blocked")
+        if value == "idle":
+            self._busy = False
+        elif value == "busy":
+            self._busy = True
+        else:
+            raise ValueError(value)
     
-    def _get_name (self):
-        return "%s-%s" % (self.bpid, self.id)
-    name = property(_get_name)
-
+    state = property(_get_state, _set_state)
+    
 
 class PartitionDict (DataDict):
+    
+    """Default container for partitions.
+    
+    Keyed by partition name.
+    """
+    
     item_cls = Partition
     key = "name"
 
 
-class NodeDict (DataDict):
-    item_cls = Node
-    key = "name"
-
-
-class Brooklyn (Component):
+class Job (Data):
     
-    """A BlueGene/L bridge simulator."""
+    """A job running on the system.
+    
+    Attributes:
+    id -- canonical integer id
+    tag -- "job"
+    pid -- master process pid
+    env -- environment for the job
+    cmd -- shell command for the job
+    stdin -- file(name) to use for stdin
+    stdout -- file(name) to use for stdout
+    stderr -- file(name) to use for stderr
+    uid -- uid running the master process
+    gid -- gid running the master process
+    runtime -- heartbeats before the job "exits"
+    """
+    
+    fields = Data.fields.copy()
+    fields.update(dict(
+        id = None,
+        tag = "job",
+        pid = None,
+        env = None,
+        cmd = None,
+        stdin = "/dev/null",
+        stdout = "/dev/null",
+        stderr = "/dev/null",
+        uid = None,
+        gid = None,
+    ))
+    
+    def __init__ (self, *args, **kwargs):
+        Data.__init__(self, *args, **kwargs)
+        self.runtime = random.randrange(1, 5)
+
+
+class JobDict (DataDict):
+    
+    """Default container for jobs.
+    
+    Keyed by job id.
+    """
+    
+    item_cls = Job
+    key = "id"
+
+
+class Simulator (Component):
+    
+    """Generic system simulator.
+    
+    Methods:
+    configure -- load partitions from an xml file
+    get_state -- db2-like description of partition state (exposed)
+    get_partitions -- retrieve partitions in the simulator (exposed, query)
+    reserve_partition -- lock a partition for use by a job (exposed)
+    release_partition -- release a locked (busy) partition (exposed)
+    add_jobs -- add (start) a job on the system (exposed, ~query)
+    get_jobs -- retrieve running jobs (exposed, query)
+    del_jobs -- delete jobs (exposed, query)
+    run_jobs -- run all jobs (automatic)
+    mpirun -- produce mpirun-like output
+    """
     
     name = "system"
-    implementation = "brooklyn"
+    implementation = "simulator"
     
-    logger = logging.getLogger("Cobalt.Components.Brooklyn")
+    logger = logging.getLogger("Cobalt.Components.Simulator")
 
     def __init__ (self, config_file=None, *args, **kwargs):
-        """Initialize a Brooklyn simulator.
+        """Initialize a system simulator.
         
         Arguments:
         config_file -- automatically configure using this xml file (optional)
         """
         Component.__init__(self, *args, **kwargs)
         self.partitions = PartitionDict()
-        self.nodes = NodeDict()
-        # fraction of simulated jobs that will
-        # run over their specified wall times
-        self.overtime_frac = 0.0
-        # fraction of simulated jobs that will
-        # fail to cleanly release their partitions
-        self.failed_release_frac = 0.0
+        self.jobs = JobDict()
         if config_file is not None:
             self.configure(config_file)
     
-    def check_pid (self, pid):
-        """checks if the specified pid is still around"""
-        process_list = os.popen("ps ax").readlines()
-        pids = [process.split()[0] for process in process_list]
-        return str(pid) in pids
-    
     def configure (self, config_file):
         
-        """Configure simulated partitions and nodes.
+        """Configure simulated partitions.
         
         Arguments:
-        config_file -- xml configuration file.
+        config_file -- xml configuration file
         """
         
         system_doc = lxml.etree.parse(config_file)
         system_def = system_doc.getroot()
-        
-        # initialize a new node dict with all nodes
-        nodes = NodeDict()
-        nodes.q_add([
-            dict(
-                bpid = node_def.get("bpid"),
-                id = node_def.get("id"),
-            )
-            for node_def in system_def.getiterator("Nodecard")
-        ])
         
         # initialize a new partition dict with all partitions
         partitions = PartitionDict()
@@ -160,7 +223,7 @@ class Brooklyn (Component):
             for partition_def in system_def.getiterator("Partition")
         ])
         
-        # parent/child and nodes
+        # parent/child relationships
         for partition_def in system_def.getiterator("Partition"):
             partition = partitions[partition_def.get("name")]
             partition.children.update([
@@ -170,46 +233,29 @@ class Brooklyn (Component):
             ])
             for child in partition.children:
                 child.parents.add(partition)
-            partition.nodes.update([
-                nodes["%s-%s" % (node_def.get("bpid"), node_def.get("id"))]
-                for node_def in partition_def.getiterator("Nodecard")
-            ])
         
         # update object state
-        self.nodes.clear()
-        self.nodes.update(nodes)
         self.partitions.clear()
         self.partitions.update(partitions)
     
-    def get_possible_nodegroups (self, group_size):
-        """returns list of possible groups of nodes of size group_size"""
-        nodes = list(self.nodes)
-        nodes.sort()
-        if group_size > len(nodes):
-            self.logger.error("get_possible_nodegroups(%r) [impossible]")
-            return []
-        possible_groups = []
-        for x in range(0, len(nodes), group_size):
-            possible_groups.append(nodes[x:x+group_size])
-        return possible_groups
-    
-    def get_db2_state (self):
-        """Return db2-like list of tuples describing state."""
+    def get_state (self):
+        """Retrieve db2-like status list.
+        
+        Status form:
+        [('partition0','I'), ('partition1', 'F'), ...]
+        
+        I -- partition is in use
+        F -- partition is free
+        """
         busy_partitions = self.partitions.q_get([{'state':"busy"}])
         return [
             (partition.name, partition in busy_partitions and 'I' or 'F')
             for partition in self.partitions
         ]
-    get_db2_state = exposed(get_db2_state)
-
-    def get_nodes (self, specs):
-        fields = get_spec_fields(specs)
-        specs = [node.to_rx(fields) for node in self.nodes.q_get(specs)]
-        specs.sort(key=operator.itemgetter('bpid', 'id'))
-        return specs
-    get_nodes = exposed(get_nodes)
+    get_state = exposed(get_state)
     
     def get_partitions (self, specs):
+        """Query partitions on simulator."""
         partitions = self.partitions.q_get(specs)
         fields = get_spec_fields(specs)
         return [partition.to_rx(fields) for partition in partitions]
@@ -227,17 +273,15 @@ class Brooklyn (Component):
         except KeyError:
             self.logger.error("reserve_partition(%r, %r) [does not exist]" % (name, size))
             return False
-        if partition in self.partitions.q_get([{'status':"busy"}]):
-            self.logger.error("reserve_partition(%r, %r) [busy]" % (name, size))
+        if partition.state != "idle":
+            self.logger.error("reserve_partition(%r, %r) [%s]" % (name, size, partition.state))
             return False
-        if partition in self.partitions.q_get([{'status':"blocked"}]):
-            self.logger.error("reserve_partition(%r, %r) [blocked]" % (name, size))
-            return False
+        if not partition.functional:
+            self.logger.error("reserve_partition(%r, %r) [not functional]" % (name, size))
         if size is not None and size > partition.size:
             self.logger.error("reserve_partition(%r, %r) [size mismatch]" % (name, size))
             return False
-        for node in partition.nodes:
-            node.state = "busy"
+        partition.state = "busy"
         self.logger.info("reserve_partition(%r, %r)" % (name, size))
         return True
     reserve_partition = exposed(reserve_partition)
@@ -256,193 +300,246 @@ class Brooklyn (Component):
         if not partition.state == "busy":
             self.logger.info("release_partition(%r) [not busy]" % (name))
             return False
-        for node in partition.nodes:
-            node.state = "idle"
+        partition.state = "idle"
         self.logger.info("release_partition(%r)")
         return True
     release_partition = exposed(release_partition)
     
-    def _set_stdfiles (self, jobspec):
-        inputfile = jobspec.get("inputfile", None)
-        if inputfile:
-            os.dup2(open(inputfile, 'r').fileno(), sys.__stdin__.fileno())
-        else:
-            os.dup2(open("/dev/null", 'r').fileno(), sys.__stdin__.fileno())
-        outlog = jobspec.get("outputfile", None)
-        if not outlog:
-            outlog = tempfile.mktemp()
-        try:
-            stdout = open(outlog, 'a')
-        except IOError, e:
-            self.logger.error("job %s/%s: Failed to open %s. (%s) stdout will be lost." % ((jobspec['jobid']), jobspec['user'], outlog, e))
-        try:
-            os.chmod(outlog, 0600)
-            os.dup2(stdout.fileno(), sys.__stdout__.fileno())
-        except OSError, e:
-            self.logger.error("job %s/%s: Failed to chmod or dup2 %s. (%s) stderr will be lost." % (jobspec['jobid'], jobspec['user'], outlog, e))
-        errlog = jobspec.get("errorfile", None)
-        if not errlog:
-            errlog = tempfile.mktemp()
-        try:
-            stderr = open(errlog, 'a')
-        except IOError, e:
-            self.logger.error("job %s/%s: Failed to open %s. (%s) stderr will be lost." % ((jobspec['jobid']), jobspec['user'], errlog, e))
-        try:
-            os.chmod(errlog, 0600)
-            os.dup2(stderr.fileno(), sys.__stderr__.fileno())
-        except OSError, e:
-            self.logger.error("job %s/%s: Failed to chmod or dup2 %s. (%s) stderr will be lost." % (jobspec['jobid'], jobspec['user'], errlog, e))
-    
-    def _set_owner (self, jobspec):
-        user_name = jobspec.get("user", None)
+    def _get_owner (self, spec):
+        """Get intended uid, gid for a job from a job spec."""
+        user_name = spec.get("user", None)
         if not user_name:
-            raise ProcessGroupCreationError("user")
+            raise JobCreationError("user")
         try:
-            uid, gid = pwd.getpwnam()[2:4]
+            uid, gid = pwd.getpwnam(user_name)[2:4]
         except KeyError:
-            raise ProcessGroupCreationError("user")
-        try:
-            os.setgid(gid)
-        except OSError, e:
-            self.logger.error("unable to change gid for process group %s (%s)" % (jobspec['pgid'], e))
-            sys.exit(0)
-        try:
-            os.setuid(uid)
-        except OSError, e:
-            self.logger.error("unable to change uid for process group %s (%s)" % (jobspec['pgid'], e))
-            sys.exit(0)
+            raise JobCreationError("user")
+        return (uid, gid)
     
-    def _set_env (self, jobspec, config_files=["/etc/cobalt.conf"]):
+    def _get_env (self, spec, config_files=["/etc/cobalt.conf"]):
+        """Get intended environment dict for a job from a job spec."""
         config = ConfigParser()
         config.read(config_files)
-        os.environ["DB_PROPERTY"] = config.get("bgpm", "db2_properties")
-        os.environ["BRIDGE_CONFIG_FILE"] = config.get("bgpm", "bridge_config")
-        os.environ["MMCS_SERVER_IP"] = config.get("bgpm", "mmcs_server_ip")
-        os.environ["DB2INSTANCE"] = config.get("bgpm", "db2_instance")
-        os.environ["LD_LIBRARY_PATH"] = "/u/bgdb2cli/sqllib/lib"
-        os.environ["COBALT_JOBID"] = jobspec['jobid']
-        # special stuff just for the simulator
-        # to make some jobs fail to behave nicely
-        os.environ["OVERTIME_FRAC"] = str(self.overtime_frac)
-        os.environ["FAILED_RELEASE_FRAC"] = str(self.failed_release_frac)
+        env = dict()
+        env["DB_PROPERTY"] = config.get("bgpm", "db2_properties")
+        env["BRIDGE_CONFIG_FILE"] = config.get("bgpm", "bridge_config")
+        env["MMCS_SERVER_IP"] = config.get("bgpm", "mmcs_server_ip")
+        env["DB2INSTANCE"] = config.get("bgpm", "db2_instance")
+        env["LD_LIBRARY_PATH"] = "/u/bgdb2cli/sqllib/lib"
+        env["COBALT_JOBID"] = spec['jobid']
+        return env
     
-    def _build_command (self, jobspec, config_files=["/etc/cobalt.conf"]):
+    def _get_cmd (self, spec, config_files=["/etc/cobalt.conf"]):
+        """Get a command string for a job from a job spec."""
         config = ConfigParser()
         config.read(config_files)
         
-        cmd = [
+        argv = [
             config.get("bgpm", "mpirun"),
             os.path.basename(config.get("bgpm", "mpirun")),
         ]
         
-        if "true_mpi_args" in jobspec:
+        if "true_mpi_args" in spec:
             # arguments have been passed along in a special attribute.  These arguments have
             # already been modified to include the partition that cobalt has selected
-            # for the job, and can just replace the arguments built above.
-            cmd.extend(jobspec['true_mpi_args'])
-        
-        else:
-            
-            cmd.extend([
-                "-np", str(jobspec['size']),
-                "-mode", jobspec.get("mode", "co"),
-                "-cwd", jobspec['cwd'],
-                "-exe", jobspec['executable'],
-            ])
-            
-            try:
-                partition = jobspec["location"][0]
-            except (KeyError, IndexError):
-                raise ProcessGroupCreationError("location")
-            cmd.extend(["-partition", partition])
-            
-            kerneloptions = jobspec.get("kerneloptions", None)
-            if kerneloptions:
-                cmd.extend(['-kernel_options', kerneloptions])
-            
-            args = jobspec.get('args', [])
-            if args:
-                cmd.extend(["-args", " ".join(args)])
-            
-            envs = jobspec.get("envs", None)
-            if envs:
-                env_kvstring = " ".join(["%s=%s" % (key, value) for key, value in envs.iteritems()])
-                cmd.extend(["-env",  env_kvstring])
-            
-            if "BGLMPI_MAPPING" in jobspec.get("env", {}):
-                # strip out BGLMPI_MAPPING until mpirun bug is fixed
-                mapfile = jobspec['env']['BGLMPI_MAPPING']
-                del jobspec['env']['BGLMPI_MAPPING']
-                cmd.extend(["-mapfile", mapfile])
-        return cmd
+            # for the job.
+            argv.extend(spec['true_mpi_args'])
+            return " ".join(argv)
     
-    def start_job (self, jobspec):
+        argv.extend([
+            "-np", str(spec['size']),
+            "-mode", spec.get("mode", "co"),
+            "-cwd", spec['cwd'],
+            "-exe", spec['executable'],
+        ])
         
-        """Start a simulated job as a local process.
+        try:
+            partition = spec["location"]
+        except (KeyError, IndexError):
+            raise JobCreationError("location")
+        argv.extend(["-partition", partition])
+        
+        kerneloptions = spec.get("kerneloptions", None)
+        if kerneloptions:
+            argv.extend(['-kernel_options', kerneloptions])
+        
+        args = spec.get('args', [])
+        if args:
+            argv.extend(["-args", " ".join(args)])
+        
+        envs = spec.get("envs", None)
+        if envs:
+            env_kvstring = " ".join(["%s=%s" % (key, value) for key, value in envs.iteritems()])
+            argv.extend(["-env",  env_kvstring])
+        
+        if "BGLMPI_MAPPING" in spec.get("env", {}):
+            # strip out BGLMPI_MAPPING until mpirun bug is fixed
+            mapfile = spec['env']['BGLMPI_MAPPING']
+            del spec['env']['BGLMPI_MAPPING']
+            argv.extend(["-mapfile", mapfile])
+        
+        return " ".join(argv)
+    
+    def add_jobs (self, specs):
+        
+        """Create a simulated job.
         
         Arguments:
-        jobspec -- dictionary hash specifying a job to start
+        spec -- dictionary hash specifying a job to start
         """
         
-        pid_pipe_r, pid_pipe_w = os.pipe()
-        child_pid = os.fork()
-        
-        # parent process
-        if child_pid != 0:
-            # read daemon child's pid through pipe
-            os.close(pid_pipe_w)
-            pid_pipe_r = os.fdopen(pid_pipe_r, 'r')
-            daemon_pid = pid_pipe_r.read()
-            pid_pipe_r.close()
-            # wait for the intermediate process to finish
-            child_pid, child_exit_status = os.waitpid(child_pid, 0)
-            self.logger.info("daemonizing process %s exited with status %s" % (child_pid, child_exit_status))
-            self.logger.info("started daemon process %s" % (daemon_pid))
-            jobspec['pid'] = daemon_pid
+        def jobspec (spec):
+            uid, gid = self._get_owner(spec)
+            jobspec = dict(
+                id = spec.get("jobid"),
+                stdin = spec.get("inputfile", "/dev/null"),
+                stdout = spec.get("outputfile", "/dev/null"),
+                stderr = spec.get("errorfile", "/dev/null"),
+                uid = uid,
+                gid = gid,
+                env = self._get_env(spec),
+                cmd = self._get_cmd(spec),
+            )
             return jobspec
         
-        # intermediate (daemonizing) process
-        os.close(pid_pipe_r)
-        os.setsid()
-        daemon_pid = os.fork()
-        if daemon_pid != 0:
-            pid_pipe_w = os.fdopen(pid_pipe_w, 'w')
-            pid_pipe_w.write(str(daemon_pid))
-            pid_pipe_w.close()
-            os._exit(0)
-        
-        # daemon process
-        os.close(pid_pipe_w)
-        self._set_stdfiles(jobspec)
-        self._set_owner(jobspec)
-        self._set_env(jobspec)
-        cmd = self._build_command(jobspec)
-        try:
-            os.execv(cmd[0], cmd[1:])
-        except Exception, e:
-            print "when trying to exec mpirun: %s", e
-            sys.exit(1)
-        sys.exit()
-    start_job = exposed(start_job)
+        jobspecs = [jobspec(spec) for spec in specs]
+        specs = [job.to_rx() for job in self.jobs.q_add(jobspecs)]
+        return specs
+    add_jobs = exposed(add_jobs)
     
     def get_jobs (self, specs):
-        """returns those jobs that are running"""
-        self.logger.info("query_jobs(%r)" % (specs))
-        return [spec for spec in specs if self.check_pid(spec['pid'])]
+        """Query jobs running on the simulator."""
+        self.logger.info("get_jobs(%r)" % (specs))
+        fields = get_spec_fields(specs)
+        specs = [job.to_rx(fields) for job in self.jobs.q_get(specs)]
+        return specs
     get_jobs = exposed(get_jobs)
     
-    def kill_job (self, spec):
-        """kill a job"""
-        try:
-            os.kill(int(spec['pid']), signal.SIGINT)
-        except OSError, e:
-            self.logger.error("Signal failure for pid %s (%s)" % (pid, e))
-    kill_job = exposed(kill_job)
-
-    def set_overtime_frac (self, val):
-        self.overtime_frac = float(val)
-    set_overtime_frac = exposed(set_overtime_frac)
+    def del_jobs (self, specs):
+        """Delete jobs running on the simulator."""
+        self.logger.info("del_jobs(%r)" % (specs))
+        fields = get_spec_fields(specs)
+        specs = [job.to_rx(fields) for job in self.jobs.q_del(specs)]
+        return specs
+    del_jobs = exposed(del_jobs)
+    
+    def run_jobs (self):
+        """Run all jobs on the simulator.
         
-    def set_failed_release_frac (self, val):
-        self.failed_release_frac = float(val)
-    set_failed_release_frac = exposed(set_failed_release_frac)
+        Jobs remain running for job.runtime calls of this method.
+        At the end of a jobs execution, this method calls simulator.mpirun
+        to product appropriate output.
+        """
+        for job in self.jobs.values():
+            job.runtime -= 1
+        finished_jobs = self.jobs.q_del([{'runtime':0}])
+        for job in finished_jobs:
+            stdout = open(job.stdout, "w")
+            stderr = open(job.stderr, "w")
+            env = os.environ.copy()
+            env.update(job.env)
+            self.mpirun(job.cmd.split(), stdout=stdout, stderr=stderr, env=env)
+    run_jobs = automatic(run_jobs)
+    
+    def mpirun (self, argv, **kwargs):
+        
+        """Produce appropriate output on stdout, stderr for a job.
+        
+        Arguments:
+        argv -- argv for the command to run (command.split())
+        
+        Keyword arguments:
+        stdin -- file to read from as stdin (not used)
+        stdout -- file to write to as stdout
+        stderr -- file to write to as stderr
+        environ -- environment dictionary for job
+        
+        stdin, stdout, stderr expect file-like objects (not file names)
+        """
+        
+        stdin = kwargs.get("stdin", sys.stdin)
+        stdout = kwargs.get("stdout", sys.stdout)
+        stderr = kwargs.get("stderr", sys.stderr)
+        environ = kwargs.get("env", {})
+        
+        try:
+            partition = argv[argv.index("-partition") + 1]
+        except ValueError:
+            print >> stderr, "ERROR: '-partition' is a required flag"
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+            return
+        except IndexError:
+            print >> stderr, "ERROR: '-partition' requires a value"
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+            return
+        
+        try:
+            mode = argv[argv.index("-mode") + 1]
+        except ValueError:
+            print >> stderr, "ERROR: '-mode' is a required flag"
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+            return
+        except IndexError:
+            print >> stderr, "ERROR: '-mode' requires a value"
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+            return
+        
+        try:
+            size = argv[argv.index("-np") + 1]
+        except ValueError:
+            print >> stderr, "ERROR: '-np' is a required flag"
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+            return
+        except IndexError:
+            print >> stderr, "ERROR: '-np' requires a value"
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+            return
+        try:
+            size = int(size)
+        except ValueError:
+            print >> stderr, "ERROR: '-np' got invalid value %r" % (size)
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+        
+        print >> stdout, "ENVIRONMENT"
+        print >> stdout, "-----------"
+        for key, value in environ.iteritems():
+            print >> stdout, "%s=%s" % (key, value)
+        print >> stdout
+        
+        print >> stderr, "FE_MPI (Info) : Initializing MPIRUN"
+        try:
+            jobid = environ["COBALT_JOBID"]
+        except KeyError:
+            print >> stderr, "FE_MPI (Info) : COBALT_JOBID not found"
+            print >> stderr, "FE_MPI (Info) : Exit status:   1"
+            return
+        bjobid = int(jobid) + 1024
+        reserved = self.reserve_partition(partition, size)
+        if not reserved:
+            print >> stderr, "BE_MPI (ERROR): Failed to run process on partition"
+            print >> stderr, "BE_MPI (Info) : BE completed"
+            print >> stderr, "FE_MPI (ERROR): Failure list:"
+            print >> stderr, "FE_MPI (ERROR): - 1. Job execution failed - unable to reserve partition", partition
+            print >> stderr, "FE_MPI (Info) : FE completed"
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+            return
+        print >> stderr, "FE_MPI (Info) : Adding job"
+        print >> stderr, "FE_MPI (Info) : Job added with id", bjobid
+        print >> stderr, "FE_MPI (Info) : Waiting for job to terminate"
+        
+        print >> stdout, "Running job with args:", argv
+        
+        print >> stderr, "FE_MPI (Info) : Job", bjobid, "switched to state TERMINATED ('T')"
+        print >> stderr, "FE_MPI (Info) : Job sucessfully terminated"
+        print >> stderr, "BE_MPI (Info) : Releasing partition", partition
+        released = self.release_partition(partition)
+        if not released:
+            print >> stderr, "BE_MPI (ERROR): Partition", partition, "could not switch to state FREE ('F')"
+            print >> stderr, "BE_MPI (Info) : BE completed"
+            print >> stderr, "FE_MPI (Info) : FE completed"
+            print >> stderr, "FE_MPI (Info) : Exit status: 1"
+            return
+        print >> stderr, "BE_MPI (Info) : Partition", partition, "switched to state FREE ('F')"
+        print >> stderr, "BE_MPI (Info) : BE completed"
+        print >> stderr, "FE_MPI (Info) : FE completed"
+        print >> stderr, "FE_MPI (Info) : Exit status: 0"

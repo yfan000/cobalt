@@ -31,7 +31,7 @@ class TestComponent (object):
         except Exception:
             pass
         else:
-            assert "dispatched to unexposed method"
+            assert not "dispatched to unexposed method"
     
     def test_automatic (self):
         

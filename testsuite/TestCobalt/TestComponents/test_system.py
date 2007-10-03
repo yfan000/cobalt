@@ -1,49 +1,40 @@
 import os
 import sets
 
-from Cobalt.Components.system import Brooklyn
+from Cobalt.Components.system import Simulator
+from Cobalt.Logging import log_to_stderr
 
 from test_base import TestComponent
 
-class TestBrooklyn (TestComponent):
+class TestSimulator (TestComponent):
     
     def setup (self):
-        self.system = Brooklyn("test_brooklyn.xml")
+        self.system = Simulator("simulator.xml")
+        log_to_stderr(self.system.logger)
     
     def test_init_configure (self):
-        config_file = "test_brooklyn.xml"
+        config_file = "simulator.xml"
         assert os.path.exists(config_file)
-        system = Brooklyn()
+        system = Simulator()
         assert not system.partitions
-        assert not system.nodes
-        system = Brooklyn(config_file)
+        system = Simulator(config_file)
         assert system.partitions
-        assert system.nodes
-    
-    def test_check_pid (self):
-        invalid_pid = -1
-        my_pid = os.getpid()
-        system = Brooklyn()
-        assert not system.check_pid(invalid_pid)
-        assert system.check_pid(my_pid)
     
     def test_configure (self):
-        config_file = "test_brooklyn.xml"
+        config_file = "simulator.xml"
         assert os.path.exists(config_file)
-        system = Brooklyn()
+        system = Simulator()
         assert not system.partitions
-        assert not system.nodes
         system.configure(config_file)
         assert system.partitions
-        assert system.nodes
     
     def test_reserve_partition (self):
         idle_partitions = self.system.partitions.q_get([{'state':"idle"}])
         partition = idle_partitions[0]
-        self.system.reserve_partition(partition.name)
+        reserved = self.system.reserve_partition(partition.name)
+        assert reserved
+        print partition.state
         assert partition.state == "busy"
-        for node in partition.nodes:
-            assert node.state == "busy"
         for parent in partition.parents:
             assert parent.state == "blocked"
         for child in partition.children:
@@ -56,3 +47,67 @@ class TestBrooklyn (TestComponent):
         self.system.release_partition(partition.name)
         idle_partitions_after = self.system.partitions.q_get([{'state':"idle"}])
         assert idle_partitions_before == idle_partitions_after
+    
+    def test_add_jobs (self):
+        self.system.add_jobs([dict(
+            jobid = "1",
+            size = "32",
+            executable = "/bin/ls",
+            location = "ANLR00",
+            cwd = os.getcwd(),
+            inputfile = "infile",
+            outputfile = "outfile",
+            errorfile = "errfile",
+            user = os.getlogin(),
+        )])
+    
+    def test_get_jobs (self):
+        specs = self.system.get_jobs([{'id':"*"}])
+        assert not specs
+        self.system.add_jobs([dict(
+            jobid = "1",
+            size = "32",
+            executable = "/bin/ls",
+            location = "ANLR00",
+            cwd = os.getcwd(),
+            inputfile = "infile",
+            outputfile = "outfile",
+            errorfile = "errfile",
+            user = os.getlogin(),
+        )])
+        specs = self.system.get_jobs([{'id':"*"}])
+        assert specs
+    
+    def test_del_jobs (self):
+        self.system.add_jobs([dict(
+            jobid = "1",
+            size = "32",
+            executable = "/bin/ls",
+            location = "ANLR00",
+            cwd = os.getcwd(),
+            inputfile = "infile",
+            outputfile = "outfile",
+            errorfile = "errfile",
+            user = os.getlogin(),
+        )])
+        specs = self.system.get_jobs([{'id':"*"}])
+        assert specs
+        self.system.del_jobs(specs)
+        specs = self.system.get_jobs([{'id':"*"}])
+        assert not specs
+    
+    def test_run_jobs (self):
+        self.system.add_jobs([dict(
+            jobid = "1",
+            size = "32",
+            executable = "/bin/ls",
+            location = "ANLR00",
+            cwd = os.getcwd(),
+            inputfile = "infile",
+            outputfile = "outfile",
+            errorfile = "errfile",
+            user = os.getlogin(),
+        )])
+        runtime = self.system.jobs.values()[0].runtime
+        for each in range(runtime):
+            self.system.run_jobs()

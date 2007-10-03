@@ -4,7 +4,7 @@ import sys
 import logging
 from getopt import getopt, GetoptError
 
-from Cobalt.Components.system import Brooklyn
+from Cobalt.Components.system import Simulator
 from Cobalt.Server import XMLRPCServer, find_intended_location
 import Cobalt.Logging
 
@@ -32,11 +32,11 @@ if __name__ == "__main__":
             config_file = item[1]
     
     Cobalt.Logging.setup_logging('brooklyn', level=log_level)
-    brooklyn = Brooklyn(config_file='../../misc/partitions.xml')
+    simulator = Simulator(config_file='../../misc/partitions.xml')
     
-    location = find_intended_location(brooklyn, config_files=[config_file])
+    location = find_intended_location(simulator, config_files=[config_file])
     server = XMLRPCServer(location, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key")
-    server.register_instance(brooklyn)
+    server.register_instance(simulator)
     
     if daemon:
         server.serve_daemon(pidfile=pidfile)
