@@ -1151,7 +1151,7 @@ class QueueDict(DataDict):
     def get_jobs(self, specs, callback=None, cargs={}):
         results = []
         for q in self.itervalues():
-            results.append(q.jobs.q_get(specs, callback, cargs))
+            results += q.jobs.q_get(specs, callback, cargs)
             
         return results
         
@@ -1163,7 +1163,7 @@ class QueueDict(DataDict):
         return results
     
     def del_queues(self, specs, callback=None, cargs={}):
-        return self.q_del(specs, callback, args)
+        return self.q_del(specs, callback, cargs)
         
     def canQueue(self, spec):
         '''Check that job meets criteria of the specified queue'''
@@ -1244,9 +1244,18 @@ class QueueManager(Component):
 
     def add_jobs(self, specs):
         '''Add a job, throws in adminemail'''
+        queue_names = self.Queues.keys()
+        
+        failed = False
         for spec in specs:
-            [queue] = [q for q in self.Queues.itervalues() if q.name == spec['queue']]
-            spec.update({'adminemail':queue.adminemail})
+            if spec['queue'] in self.Queues:
+                spec.update({'adminemail':self.Queues[spec['queue']].adminemail})
+            else:
+                logger.error("trying to add job to non-existant queue %s" % spec['queue'])
+                failed = True
+        if failed:
+            return []
+        
         response = self.Queues.add_jobs(specs)
         return response
     add_jobs = exposed(add_jobs)
@@ -1255,16 +1264,16 @@ class QueueManager(Component):
         '''Delete a job'''
         ret = []
         for spec in data:
-            for job, q in [(job, queue) for queue in self.Queues for job in queue if job.match(spec)]:
+            for job, q in [(job, queue) for queue in self.Queues.itervalues() for job in queue.jobs if job.match(spec)]:
                 ret.append(job.to_rx(spec))
                 if job.state in ['queued', 'ready'] or (job.state == 'hold' and not job.pgid):
                     #q.remove(job)
-                    q.q_del(spec)
+                    q.jobs.q_del([spec])
                 elif force:
                     # Need acct log message for forced delete, 
                     # otherwise can't tell if job ever ended
                     job.Kill("Job %s killed based on admin request")
-                    q.q_del(spec)
+                    q.jobs.q_del([spec])
                 else:
                     job.Kill("Job %s killed based on user request")
                 # It's my understanding that the above code draws a distinction
@@ -1281,11 +1290,11 @@ class QueueManager(Component):
         if force:
             return self.Queues.del_queues(cdata)
         
-        queues = [q.name for q in self.Queues.get_queues(cdata)]
+        queues = [q for q in self.Queues.get_queues(cdata)]
         
         failed = []
         for queue in queues[:]:
-            jobs = list(iter(queues))
+            jobs = queue.jobs.q_get([{'tag':"job"}])
             if len(jobs) > 0:
                 failed.append(queue.name)
                 queues.remove(queue)
@@ -1376,6 +1385,6 @@ class QueueManager(Component):
     def setJobs(self, specs, updates):
         def _setJobs(job, newattr):
             job.update(newattr)
-        return self.Queues.get_queues(specs, _setJobs, updates)
+        return self.Queues.get_jobs(specs, _setJobs, updates)
     setJobs = exposed(setJobs)
 
