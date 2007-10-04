@@ -1,7 +1,18 @@
+import logging
+
 from Cobalt.Components.base import Component, exposed, automatic
+import Cobalt.Proxy
+import Cobalt.Logging
 
 
 class TestComponent (object):
+    
+    def setup (self):
+        logger = logging.getLogger()
+        Cobalt.Logging.log_to_stderr(logger)
+    
+    def teardown (self):
+        Cobalt.Proxy.local_components.clear()
     
     def test_exposed (self):
         

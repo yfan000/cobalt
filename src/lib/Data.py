@@ -168,9 +168,8 @@ class Data (object):
         spec -- A dictionary specifying the values of fields to set.
         """
         for key, value in spec.iteritems():
-            if key not in self.fields:
-                warnings.warn("Creating new field '%s' on '%s' with update." % (key, self), RuntimeWarning, stacklevel=2)
-                self.fields[key] = None
+            if not hasattr(self, key):
+                warnings.warn("Creating new attribute '%s' on '%s' with update." % (key, self), RuntimeWarning, stacklevel=2)
             setattr(self, key, value)
     
     def get (self, field, default=None):
@@ -195,6 +194,50 @@ class Data (object):
             warnings.warn("Creating new field '%s' on '%s' with set." % (field, self), RuntimeWarning, stacklevel=2)
             self.fields[field] = None
         setattr(self, field, value)
+
+
+class Job (Data):
+    
+    """The canonical definition of a Cobalt job.
+    
+    Attributes:
+    tag -- "job"
+    id -- unique id
+    state -- current state of the job (queued, running, done)
+    executable -- file to execute
+    args -- arguments to pass to the executable
+    stdin -- file to use for stdin
+    stdout -- file to use for stdout
+    stderr -- file to use for stderr
+    cwd -- current working directory
+    env -- environment variables for the job
+    user -- user executing the job
+    exit -- exit status of the job
+    kerneloptions -- options to pass to the kernel
+    size -- number of nodes/processes in the job
+    location -- where to execute the job (partition?)
+    mode -- execution mode of the job
+    """
+    
+    fields = Data.fields.copy()
+    fields.update(dict(
+        tag = "job",
+        id = None,
+        state = None,
+        executable = None,
+        args = None,
+        stdin = "/dev/null",
+        stdout = "/dev/null",
+        stderr = "/dev/null",
+        cwd = None,
+        env = None,
+        user = None,
+        exit = None,
+        kerneloptions = None,
+        size = None,
+        location = None,
+        mode = None,
+    ))
 
 
 class DataList (list):

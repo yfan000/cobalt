@@ -6,9 +6,14 @@ from Cobalt.Logging import log_to_stderr
 
 from test_base import TestComponent
 
+__all__ = [
+    "TestSimulator",
+]
+
 class TestSimulator (TestComponent):
     
     def setup (self):
+        TestComponent.setup(self)
         self.system = Simulator("simulator.xml")
         log_to_stderr(self.system.logger)
     
@@ -50,7 +55,7 @@ class TestSimulator (TestComponent):
     
     def test_add_jobs (self):
         self.system.add_jobs([dict(
-            jobid = "1",
+            id = "1",
             size = "32",
             executable = "/bin/ls",
             location = "ANLR00",
@@ -65,7 +70,7 @@ class TestSimulator (TestComponent):
         specs = self.system.get_jobs([{'id':"*"}])
         assert not specs
         self.system.add_jobs([dict(
-            jobid = "1",
+            id = "1",
             size = "32",
             executable = "/bin/ls",
             location = "ANLR00",
@@ -80,7 +85,7 @@ class TestSimulator (TestComponent):
     
     def test_del_jobs (self):
         self.system.add_jobs([dict(
-            jobid = "1",
+            id = "1",
             size = "32",
             executable = "/bin/ls",
             location = "ANLR00",
@@ -99,7 +104,7 @@ class TestSimulator (TestComponent):
     
     def test_run_jobs (self):
         self.system.add_jobs([dict(
-            jobid = "1",
+            id = "1",
             size = "32",
             executable = "/bin/ls",
             location = "ANLR00",
@@ -112,3 +117,23 @@ class TestSimulator (TestComponent):
         runtime = self.system.jobs.values()[0].runtime
         for each in range(runtime):
             self.system.run_jobs()
+    
+    def test_signal_jobs (self):
+        self.system.add_jobs([dict(
+            id = "1",
+            size = "32",
+            executable = "/bin/ls",
+            location = "ANLR00",
+            cwd = os.getcwd(),
+            inputfile = "infile",
+            outputfile = "outfile",
+            errorfile = "errfile",
+            user = os.getlogin(),
+        )])
+        
+        jobs = self.system.signal_jobs([{'id':"*"}], "SIGINT")
+        assert jobs
+        assert self.system.jobs
+        jobs = self.system.signal_jobs([{'id':"*"}], "SIGKILL")
+        assert jobs
+        assert not self.system.jobs

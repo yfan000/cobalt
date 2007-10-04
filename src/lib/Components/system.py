@@ -24,7 +24,8 @@ from ConfigParser import ConfigParser
 import lxml
 import lxml.etree
 
-from Cobalt.Data import Data, DataDict
+import Cobalt.Data
+from Cobalt.Data import Data, DataDict, IncrID
 from Cobalt.Components.base import Component, exposed, automatic, query
 
 __all__ = [
@@ -117,41 +118,27 @@ class PartitionDict (DataDict):
     key = "name"
 
 
-class Job (Data):
+class Job (Cobalt.Data.Job):
     
-    """A job running on the system.
+    """An extension of a cobalt job.
     
     Attributes:
-    id -- canonical integer id
-    tag -- "job"
-    pid -- master process pid
-    env -- environment for the job
-    cmd -- shell command for the job
-    stdin -- file(name) to use for stdin
-    stdout -- file(name) to use for stdout
-    stderr -- file(name) to use for stderr
-    uid -- uid running the master process
-    gid -- gid running the master process
-    runtime -- heartbeats before the job "exits"
+    uid -- user id of the running process
+    gid -- group id of the running process
+    cmd -- commandline executed
+    pid -- process id
+    runtime -- number of heartbeats before the process ends
     """
     
-    fields = Data.fields.copy()
-    fields.update(dict(
-        id = None,
-        tag = "job",
-        pid = None,
-        env = None,
-        cmd = None,
-        stdin = "/dev/null",
-        stdout = "/dev/null",
-        stderr = "/dev/null",
-        uid = None,
-        gid = None,
-    ))
+    id_gen = IncrID()
     
     def __init__ (self, *args, **kwargs):
-        Data.__init__(self, *args, **kwargs)
+        self.uid = None
+        self.gid = None
+        self.cmd = None
+        self.pid = self.id_gen.next()
         self.runtime = random.randrange(1, 5)
+        Data.__init__(self, *args, **kwargs)
 
 
 class JobDict (DataDict):
@@ -325,7 +312,7 @@ class Simulator (Component):
         env["MMCS_SERVER_IP"] = config.get("bgpm", "mmcs_server_ip")
         env["DB2INSTANCE"] = config.get("bgpm", "db2_instance")
         env["LD_LIBRARY_PATH"] = "/u/bgdb2cli/sqllib/lib"
-        env["COBALT_JOBID"] = spec['jobid']
+        env["COBALT_JOBID"] = spec['id']
         return env
     
     def _get_cmd (self, spec, config_files=["/etc/cobalt.conf"]):
@@ -347,7 +334,7 @@ class Simulator (Component):
     
         argv.extend([
             "-np", str(spec['size']),
-            "-mode", spec.get("mode", "co"),
+            "-mode", spec.get("mode", None) or "co",
             "-cwd", spec['cwd'],
             "-exe", spec['executable'],
         ])
@@ -371,12 +358,11 @@ class Simulator (Component):
             env_kvstring = " ".join(["%s=%s" % (key, value) for key, value in envs.iteritems()])
             argv.extend(["-env",  env_kvstring])
         
-        if "BGLMPI_MAPPING" in spec.get("env", {}):
+        if "BGLMPI_MAPPING" in (spec.get("env", None) or {}):
             # strip out BGLMPI_MAPPING until mpirun bug is fixed
             mapfile = spec['env']['BGLMPI_MAPPING']
             del spec['env']['BGLMPI_MAPPING']
             argv.extend(["-mapfile", mapfile])
-        
         return " ".join(argv)
     
     def add_jobs (self, specs):
@@ -390,10 +376,10 @@ class Simulator (Component):
         def jobspec (spec):
             uid, gid = self._get_owner(spec)
             jobspec = dict(
-                id = spec.get("jobid"),
-                stdin = spec.get("inputfile", "/dev/null"),
-                stdout = spec.get("outputfile", "/dev/null"),
-                stderr = spec.get("errorfile", "/dev/null"),
+                id = spec.get("id"),
+                stdin = spec.get("stdin", "/dev/null"),
+                stdout = spec.get("stdout", "/dev/null"),
+                stderr = spec.get("stderr", "/dev/null"),
                 uid = uid,
                 gid = gid,
                 env = self._get_env(spec),
@@ -416,6 +402,14 @@ class Simulator (Component):
         self.logger.info("del_jobs(%r)" % (specs))
         return self.jobs.q_del(specs)
     del_jobs = exposed(query(del_jobs))
+    
+    def signal_jobs (self, specs, signame="SIGINT"):
+        """Simulate the signaling of a job."""
+        if signame == "SIGKILL":
+            return self.del_jobs(specs)
+        else:
+            return self.get_jobs(specs)
+    signal_jobs = exposed(query(signal_jobs))
     
     def run_jobs (self):
         """Run all jobs on the simulator.

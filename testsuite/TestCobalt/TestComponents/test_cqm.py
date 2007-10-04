@@ -2,10 +2,14 @@ import time
 
 from Cobalt.Components.cqm import QueueManager
 
+from test_base import TestComponent
 
-class TestQueueManager(object):
+__all__ = ["TestQueueManager"]
+
+class TestQueueManager (TestComponent):
     
     def setup(self):
+        TestComponent.setup(self)
         self.cqm = QueueManager()
     
     def test_add_queues(self):

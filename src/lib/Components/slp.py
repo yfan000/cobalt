@@ -162,7 +162,7 @@ class PollingServiceLocator (ServiceLocator):
         """
         for service in self.services.values():
             try:
-                ServerProxy(self.service.location).ping()
+                ServerProxy(service.location).ping()
             except socket.error, e:
                 self.logger.warn("unable to contact %s [%s]" % (service.name, e))
                 self.unregister(service.name)
@@ -206,6 +206,6 @@ class TimingServiceLocator (ServiceLocator):
         now = time.time()
         for service in self.services.values():
             if now - service.stamp > self.expire:
-                self.logger.warn("%s expired" % (service.name))
+                self.logger.info("%s expired" % (service.name))
                 self.unregister(service.name)
     expire_services = automatic(expire_services)

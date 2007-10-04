@@ -3,10 +3,17 @@ import time
 from Cobalt.Components.slp import \
     ServiceLocator, PollingServiceLocator, TimingServiceLocator
 
+from test_base import TestComponent
 
-class TestServiceLocator (object):
+__all__ = [
+    "TestServiceLocator",
+    "TestPollingServiceLocator", "TestTimingServiceLocator",
+]
+
+class TestServiceLocator (TestComponent):
     
     def setup (self):
+        TestComponent.setup(self)
         self.slp = ServiceLocator()
     
     def test_register (self):
