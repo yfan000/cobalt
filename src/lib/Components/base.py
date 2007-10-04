@@ -179,7 +179,7 @@ class Component (object):
         result = func(*args)
         if getattr(func, "query", False):
             if not getattr(func, "query_all_methods", False):
-                margs = args[0:]
+                margs = args[:1]
             else:
                 margs = []
             result = marshal_query_result(result, *margs)
