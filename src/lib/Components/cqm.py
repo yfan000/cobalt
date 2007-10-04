@@ -11,7 +11,7 @@ import logging, os, sys, time, xml.sax.saxutils, xmlrpclib, ConfigParser, copy, 
 #import Cobalt.Component, Cobalt.Data, Cobalt.Logging, Cobalt.Proxy, Cobalt.Util, Cobalt.Cqparse
 import Cobalt.Util, Cobalt.Cqparse
 from Cobalt.Data import Data, DataList, DataDict, get_spec_fields, IncrID
-from Cobalt.Components.base import Component, exposed, automatic
+from Cobalt.Components.base import Component, exposed, automatic, query
 from Cobalt.Server import XMLRPCServer, find_intended_location
 
 
@@ -953,8 +953,7 @@ class JobList(DataList):
         for spec in specs:
             if "jobid" not in spec or spec['jobid'] == "*":
                 spec['jobid'] = self.id_gen.next()
-                    
-        DataList.q_add(self, specs, self.add_helper)
+        return DataList.q_add(self, specs, self.add_helper)
 
 class Restriction(Data):
     
@@ -1136,7 +1135,7 @@ class QueueDict(DataDict):
             if spec['queue'] not in queue_names:
                 logger.error("trying to add job to non-existant queue %s" % spec['queue'])
                 failed = True
-            if not self.canQueue(spec)[0]:
+            if not self.can_queue(spec)[0]:
                 logger.error("job %r cannot be added to queue" % spec)
                 failed = True
         results = []
@@ -1144,9 +1143,11 @@ class QueueDict(DataDict):
             return results
         
         # we know all of the queues exist, so add the jobs to the appropriate JobList
-        # FIXME: add stuff for CanQueue
+        # FIXME: add stuff for can_queue
         for spec in specs:
-            results.append(self[spec['queue']].jobs.q_add([spec], callback, cargs))
+            results += self[spec['queue']].jobs.q_add([spec], callback, cargs)
+            
+        return results
     
     def get_jobs(self, specs, callback=None, cargs={}):
         results = []
@@ -1158,14 +1159,14 @@ class QueueDict(DataDict):
     def del_jobs(self, specs, callback=None, cargs={}):
         results = []
         for q in self.itervalues():
-            results.append(q.jobs.q_del(specs, callback, cargs))
+            results += q.jobs.q_del(specs, callback, cargs)
             
         return results
     
     def del_queues(self, specs, callback=None, cargs={}):
         return self.q_del(specs, callback, cargs)
         
-    def canQueue(self, spec):
+    def can_queue(self, spec):
         '''Check that job meets criteria of the specified queue'''
         # if queue doesn't exist, don't check other restrictions
         if spec['queue'] not in [q.name for q in self.itervalues()]:
@@ -1258,14 +1259,14 @@ class QueueManager(Component):
         
         response = self.Queues.add_jobs(specs)
         return response
-    add_jobs = exposed(add_jobs)
+    add_jobs = exposed(query(add_jobs))
 
     def del_jobs(self, data, force=False, user=None):
         '''Delete a job'''
         ret = []
         for spec in data:
             for job, q in [(job, queue) for queue in self.Queues.itervalues() for job in queue.jobs if job.match(spec)]:
-                ret.append(job.to_rx(spec))
+                ret.append(job)
                 if job.state in ['queued', 'ready'] or (job.state == 'hold' and not job.pgid):
                     #q.remove(job)
                     q.jobs.q_del([spec])
@@ -1283,14 +1284,14 @@ class QueueManager(Component):
                     requester = user or job.user, # who deleted the job
                 )
         return ret
-    del_jobs = exposed(del_jobs)
+    del_jobs = exposed(query(del_jobs))
 
-    def del_queues(self, cdata, force=False):
+    def del_queues(self, specs, force=False):
         '''Delete queue(s), but check if there are still jobs in the queue'''
         if force:
-            return self.Queues.del_queues(cdata)
-        
-        queues = [q for q in self.Queues.get_queues(cdata)]
+            return self.Queues.del_queues(specs)
+
+        queues = self.Queues.get_queues(specs)
         
         failed = []
         for queue in queues[:]:
@@ -1303,13 +1304,13 @@ class QueueManager(Component):
             raise xmlrpclib.Fault(31, "The %s queue(s) contains jobs. Either move the jobs to another queue, or \nuse 'cqadm -f --delq' to delete the queue(s) and the jobs.\n\nDeleted Queues\n================\n%s" % (",".join(failed), "\n".join([q.name for q in response])))
         else:
             return response
-    del_queues = exposed(del_queues)
+    del_queues = exposed(query(del_queues))
 
-    def queue_history(self, data):
+    def get_history(self, data):
         '''Fetches queue history from acct log'''
         self.cqp.perform_default_parse()
         return self.cqp.Get(data)
-    queue_history = exposed(queue_history)
+    get_history = exposed(get_history)
 
     def pm_sync(self):
         '''Resynchronize with the process manager'''
@@ -1355,36 +1356,36 @@ class QueueManager(Component):
 
     def get_jobs(self, specs):
         return self.Queues.get_jobs(specs)
-    get_jobs = exposed(get_jobs)
+    get_jobs = exposed(query(get_jobs))
 
     def get_queues(self, specs):
         return self.Queues.get_queues(specs)
-    get_queues = exposed(get_queues)
+    get_queues = exposed(query(get_queues))
 
     def add_queues(self, specs):
         return self.Queues.add_queues(specs)
-    add_queues = exposed(add_queues)
+    add_queues = exposed(query(add_queues))
     
     def can_queue(self, job_spec):
-        return self.Queues.canQueue(job_spec)
+        return self.Queues.can_queue(job_spec)
     can_queue = exposed(can_queue)
 
     def set_queues(self, specs, updates):
         def _setQueues(queue, newattr):
             queue.update(newattr)
         return self.Queues.get_queues(specs, _setQueues, updates)
-    set_queues = exposed(set_queues)
+    set_queues = exposed(query(set_queues))
         
 
     def run_jobs(self, specs, nodelist):
         def _run_jobs(job, nodes):
             job.Run(nodes)
         return self.Queues.get_queues(specs, _run_jobs, nodelist)
-    run_jobs = exposed(run_jobs)
+    run_jobs = exposed(query(run_jobs))
 
     def set_jobs(self, specs, updates):
         def _set_jobs(job, newattr):
             job.update(newattr)
         return self.Queues.get_jobs(specs, _set_jobs, updates)
-    set_jobs = exposed(set_jobs)
+    set_jobs = exposed(query(set_jobs))
 
