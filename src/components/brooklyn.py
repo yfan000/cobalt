@@ -32,7 +32,7 @@ if __name__ == "__main__":
             config_file = item[1]
     
     Cobalt.Logging.setup_logging('brooklyn', level=log_level)
-    simulator = Simulator(config_file='../../misc/partitions.xml')
+    simulator = Simulator(config_file='simulator.xml')
     
     location = find_intended_location(simulator, config_files=[config_file])
     server = XMLRPCServer(location, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key")
