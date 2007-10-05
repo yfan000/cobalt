@@ -146,39 +146,35 @@ class ScriptManager(Component):
                     self.logger.error("Got more than one match for pid %s" % (pid))
     manage_children = automatic(manage_children)
 
-    def createProcessGroup(self, data):
+    def add_jobs(self, specs):
         '''Create new process group element'''
-        self.logger.info("creating process group %r" % data)
-        return self.pgroups.q_add(data)
-    createProcessGroup = exposed(query(createProcessGroup))
+        self.logger.info("creating process group %r" % specs)
+        return self.pgroups.q_add(specs)
+    add_jobs = exposed(query(add_jobs))
     
-    def getProcessGroup(self, data):
+    def get_jobs(self, specs):
         '''query existing process group'''
-        self.logger.info("querying for process group %r" % data)
-        return self.pgroups.q_get(data)
-    getProcessGroup = exposed(query(getProcessGroup))
+        self.logger.info("querying for process group %r" % specs)
+        return self.pgroups.q_get(specs)
+    get_jobs = exposed(query(get_jobs))
 
-    def waitProcessGroup(self, data):
+    def wait_jobs(self, specs):
         '''Remove completed process group'''
-        self.logger.info("removing process group %r" % data)
-        return self.pgroups.q_del(data)
-    waitProcessGroup = exposed(query(waitProcessGroup))
+        self.logger.info("removing process group %r" % specs)
+        return self.pgroups.q_del(specs)
+    wait_jobs = exposed(query(wait_jobs))
 
-    def signalProcessGroup(self, data, sig):
+    def signal_jobs(self, specs, sig):
         '''signal existing process group with specified signal'''
-        self.logger.info("signaling process group %r with signal %r" % (data, sig))
-        for pg in self.pgroups:
-            if pg.pgid == data['pgid']:
-                return pg.Signal(sig)
+        ret = []
+        for spec in specs:
+            self.logger.info("signaling process group %r with signal %r" % (spec, sig))
+            for pg in self.pgroups:
+                if pg.pgid == spec['pgid']:
+                    ret.append(pg.Signal(sig))
         # could not find pg, so return False
-        return False
-    signalProcessGroup = exposed(signalProcessGroup)
-
-    def killProcessGroup(self, data):
-        '''kill existing process group'''
-        self.logger.info("killing process group %r" % data)
-        return self.signalProcessGroup(address, data, 'SIGINT')
-    killProcessGroup = exposed(killProcessGroup)
+        return ret
+    signal_jobs = exposed(signal_jobs)
     
     def SigChildHand(self, sig, frame):
         '''Dont Handle SIGCHLDs'''

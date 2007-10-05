@@ -13,6 +13,8 @@ import Cobalt.Util, Cobalt.Cqparse
 from Cobalt.Data import Data, DataList, DataDict, get_spec_fields, IncrID
 from Cobalt.Components.base import Component, exposed, automatic, query
 from Cobalt.Server import XMLRPCServer, find_intended_location
+from Cobalt.Proxy import ComponentProxy
+
 
 
 logger = logging.getLogger('cqm')
@@ -317,9 +319,9 @@ class Job(Data):
             try:
                 #pgroups = self.comms['pm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'output':'*', 'error':'*'}])
                 if self.mode == 'script':
-                    result = self.comms['sm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit_status':'*'}])
+                    result = ComponentProxy("script-manager").wait_jobs([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit_status':'*'}])
                 else:
-                    result = self.comms['pm'].WaitProcessGroup([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit_status':'*'}])
+                    result = ComponentProxy("process-manager").wait_jobs([{'tag':'process-group', 'pgid':self.spgid['user'], 'exit_status':'*'}])
                 if result:
                     self.exit_status = result[0].get('exit_status')
                 #this seems needed to get the info back into the object so it can be handed back to the filestager.
@@ -339,43 +341,9 @@ class Job(Data):
         self.SetActive()
 
     def FinalizeStage(self):
-        '''Write output streams to the file stager'''
-        try:
-            self.comms['fs'].WriteStreams(self.stageid, self.output, self.error)
-            self.comms['fs'].FinalizeState(self.stageid)
-        except:
-            logger.error("Failed to contact %s for finalize, requeuing" % (self.scomp))
-            self.steps = ['FinalizeStage'] + self.steps
+        '''This method should be removed.'''
         self.SetActive()
 
-    def StageInit(self):
-        '''Initialize staging for jobs that need it'''
-        # we need to assess which parts of stage need to complete
-        try:
-            stagespec = {'tag':'stage', 'outputdir':self.outputdir, 'name':self.jobid,
-                         'size':self.nodes, 'user':self.user,
-                         'script':xml.sax.saxutils.escape(self.script)}
-            if self.stagein:
-                stagespec['in'] = self.stagein
-            if self.stageout:
-                stagespec['out'] = self.stageout
-            stage = self.comms['fs'].SetupStage(stagespec)
-        except xmlrpclib.Fault, fault:
-            logger.error("Failed to initialize stage")
-            self.fail_job('stage-error')
-            print fault
-            return
-        except Cobalt.Proxy.CobaltComponentError:
-            logger.error("couldn't contact the File Stager")
-            return
-        except:
-            logger.error("Unexpected failure during stage initialization", exc_info=1)
-            self.fail_job('stage-error')
-            return
-        self.url = stage['uri']
-        self.stageid = stage['id']
-        self.scomp = stage['component']
-        logger.debug("Got stageid %s for job %s" % (self.stageid, self.jobid))
 
     def RunPrologue(self):
         '''Run the job prologue'''
@@ -431,13 +399,13 @@ class Job(Data):
         errorfile = "%s/%s.error" % (self.outputdir, self.jobid)
         cwd = self.cwd or self.envs['data']['PWD']
         env = self.envs['data']
+        
         try:
-            pgroup = self.comms['pm'].CreateProcessGroup(
-                {'tag':'process-group', 'user':self.user, 'pgid':'*', 'executable':'/usr/bin/mpish',
+            pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'user':self.user, 'pgid':'*', 'executable':'/usr/bin/mpish',
                  'size':self.procs, 'args':args, 'envs':env, 'errorfile':errorfile,
                  'outputfile':outputfile, 'location':location, 'cwd':cwd, 'path':"/bin:/usr/bin:/usr/local/bin",
-                 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions})
-        except xmlrpclib.Fault:
+                 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions}])
+        except ComponentLookupError:
             logger.error("Failed to communicate with process manager")
             raise ProcessManagerError
         self.pgid['user'] = pgroup[0]['pgid']
@@ -452,11 +420,6 @@ class Job(Data):
         if self.state in ['epilogue', 'cleanup']:
             logger.info("Not killing job %s during recovery" % (self.jobid))
         elif self.state in ['setup', 'prologue', 'stage-pending', 'stage-error', 'pm-error']:
-            # first kill the lien
-            try:
-                self.comms['am'].DelLien({'tag':'lien', 'id':self.lienID})
-            except:
-                logger.error("Failed to delete lien id %s for project %s" % (self.lienID, self.project))
             # then perform step manipulation
             if self.state in ['setup', 'prologue']:
                 self.steps.remove('RunUserJob')
@@ -484,18 +447,15 @@ class Job(Data):
     def AdminStart(self, cmd):
         '''Run an administrative job step'''
         location = self.location.split(':')
+        
         try:
-            pgrp = self.comms['pm'].CreateProcessGroup(
-                {'tag':'process-group', 'pgid':'*', 'user':'root', 'size':self.nodes,
+            pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'pgid':'*', 'user':'root', 'size':self.nodes,
                  'path':"/bin:/usr/bin:/usr/local/bin", 'cwd':'/', 'executable':cmd, 'envs':{},
                  'args':[self.user], 'location':location, 'inputfile':self.inputfile,
-                 'kerneloptions':self.kerneloptions})
-        except xmlrpclib.Fault, fault:
-            print fault
-        except:
-            logger.error("Unexpected failure in administrative process start", exc_info=1)
-            self.state = 'pm-error'
-            return
+                 'kerneloptions':self.kerneloptions}])
+        except ComponentLookupError:
+            logger.error("Failed to communicate with process manager")
+            raise ProcessManagerError
         
         self.pgid[cmd] = pgrp[0]['pgid']
 
@@ -512,10 +472,11 @@ class Job(Data):
 
     def KillPGID(self, pgid):
         '''Kill a process group'''
+        
         try:
-            self.comms['pm'].KillProcessGroup({'tag':'process-group', 'pgid':pgid})
-        except xmlrpclib.Fault:
-            logger.error("Failed to kill process group %s" % (pgid))
+            pgroup = ComponentProxy("process-manager").signal_jobs([{'tag':'process-group', 'pgid':pgid}], "SIGKILL")
+        except ComponentLookupError:
+            logger.error("Failed to communicate with process manager")
             raise ProcessManagerError
 
     def over_time(self):
@@ -758,15 +719,15 @@ class BGJob(Job):
 
         if self.mode == 'script':
             try:
-                pgroup = self.comms['sm'].CreateProcessGroup({'tag':'process-group', 'user':self.user, 'pgid':'*', 'outputfile':self.outputpath,
+                pgroup = ComponentProxy("script-manager").add_jobs([{'tag':'process-group', 'user':self.user, 'pgid':'*', 'outputfile':self.outputpath,
                      'errorfile':self.errorpath, 'path':self.path, 'size':self.procs,
                      'mode':self.mode, 'cwd':self.outputdir, 'executable':self.command,
                      'args':self.args, 'envs':self.envs, 'location':[self.location],
-                     'jobid':self.jobid, 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions})            
-            except xmlrpclib.Fault:
+                     'jobid':self.jobid, 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions}])
+            except ComponentLookupError:
+                logger.error("Failed to communicate with script manager")
                 raise ScriptManagerError
-            except Cobalt.Proxy.CobaltComponentError:
-                raise ScriptManagerError
+            
             if not pgroup[0].has_key('pgid'):
                 logger.error("Process Group creation failed for Job %s" % self.jobid)
                 self.state = 'sm-failure'
@@ -774,16 +735,15 @@ class BGJob(Job):
                 self.pgid['user'] = pgroup[0]['pgid']
         else:
             try:
-                pgroup = self.comms['pm'].CreateProcessGroup(
-                    {'tag':'process-group', 'user':self.user, 'pgid':'*', 'outputfile':self.outputpath,
+                pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'user':self.user, 'pgid':'*', 'outputfile':self.outputpath,
                      'errorfile':self.errorpath, 'path':self.path, 'size':self.procs,
                      'mode':self.mode, 'cwd':self.outputdir, 'executable':self.command,
                      'args':self.args, 'envs':self.envs, 'location':[self.location],
-                     'jobid':self.jobid, 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions})
-            except xmlrpclib.Fault:
+                     'jobid':self.jobid, 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions}])
+            except ComponentLookupError:
+                logger.error("Failed to communicate with process manager")
                 raise ProcessManagerError
-            except Cobalt.Proxy.CobaltComponentError:
-                raise ProcessManagerError
+            
             if not pgroup[0].has_key('pgid'):
                 logger.error("Process Group creation failed for Job %s" % self.jobid)
                 self.state = 'pm-failure'
@@ -901,14 +861,13 @@ class ScriptMPIJob(Job):
             self.set('errorpath', "%s/%s.error" % (self.get('outputdir'), self.get('jobid')))
 
         try:
-            pgroup = self.comms['pm'].CreateProcessGroup(
-                {'tag':'process-group', 'user':self.get('user'), 'pgid':'*', 'outputfile':self.get('outputpath', ''),
+            pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'user':self.get('user'), 'pgid':'*', 'outputfile':self.get('outputpath', ''),
                  'errorfile':self.get('errorpath', ''), 'path':self.get('path', ''), 'cwd':self.get('outputdir', ''), 'location':[self.get('location')],
-                 'jobid':self.get('jobid'), 'inputfile':self.get('inputfile', ''), 'true_mpi_args':self.get('true_mpi_args'), 'envs':{}})
-        except xmlrpclib.Fault:
-            raise ScriptManagerError
-        except Cobalt.Proxy.CobaltComponentError:
-            raise ScriptManagerError
+                 'jobid':self.get('jobid'), 'inputfile':self.get('inputfile', ''), 'true_mpi_args':self.get('true_mpi_args'), 'envs':{}}])
+        except ComponentLookupError:
+            logger.error("Failed to communicate with process manager")
+            raise ProcessManagerError
+
         if not pgroup[0].has_key('pgid'):
             logger.error("Process Group creation failed for Job %s" % self.get('jobid'))
             self.set('state', 'sm-failure')
@@ -1314,10 +1273,11 @@ class QueueManager(Component):
 
     def pm_sync(self):
         '''Resynchronize with the process manager'''
+        
         try:
-            pgs = self.comms['pm'].GetProcessGroup([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
-        except Cobalt.Proxy.CobaltComponentError:
-            self.logger.error("Failed to connect to the process manager")
+            pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
+        except ComponentLookupError:
+            logger.error("Failed to communicate with process manager")
             return
         live = [item['pgid'] for item in pgs]
         for job in [j for queue in self.Queues for j in queue if j.mode!='script']:
@@ -1331,9 +1291,9 @@ class QueueManager(Component):
     def sm_sync(self):
         '''Resynchronize with the script manager'''
         try:
-            pgs = self.comms['sm'].GetProcessGroup([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
-        except Cobalt.Proxy.CobaltComponentError:
-            self.logger.error("Failed to connect to the script manager")
+            pgroup = ComponentProxy("script-manager").add_jobs([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
+        except ComponentLookupError:
+            logger.error("Failed to communicate with script manager")
             return
         live = [item['pgid'] for item in pgs]
         for job in [j for queue in self.Queues for j in queue if j.mode=='script']:
