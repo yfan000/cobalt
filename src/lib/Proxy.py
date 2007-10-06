@@ -32,7 +32,7 @@ class ComponentLookupError (Exception):
     """
 
 
-def ComponentProxy (component_name, *args, **kwargs):
+def ComponentProxy (component_name, **kwargs):
     """ServerProxy factory function.
     
     Returns proxies to components.
@@ -42,10 +42,14 @@ def ComponentProxy (component_name, *args, **kwargs):
     
     Additional arguments are passed to the ServerProxy constructor.
     """
+    
+    if kwargs.get("defer", False):
+        return DeferredProxy(component_name)
+    
     if component_name in local_components:
         return LocalProxy(local_components[component_name])
     elif component_name in known_servers:
-        return ServerProxy(known_servers[component_name], allow_none=True, *args, **kwargs)
+        return ServerProxy(known_servers[component_name], allow_none=True)
     elif component_name != "service-location":
         try:
             slp = ComponentProxy("service-location")
@@ -57,7 +61,7 @@ def ComponentProxy (component_name, *args, **kwargs):
             raise ComponentLookupError(component_name)
         if not address:
             raise ComponentLookupError(component_name)
-        return ServerProxy(address, *args, **kwargs)
+        return ServerProxy(address)
     else:
         raise ComponentLookupError(component_name)
 
@@ -89,6 +93,33 @@ class LocalProxyMethod (object):
     
     def __call__ (self, *args):
         return self.component._dispatch(self.func_name, args)
+
+
+class DeferredProxy (object):
+    
+    """Proxy-like object that gets a new proxy for each method call.
+    
+    This defers component lookup to method call time, rather than
+    proxy instantiation time.
+    """
+    
+    def __init__ (self, component_name):
+        self._component_name = component_name
+    
+    def __getattr__ (self, attribute):
+        return DeferredProxyMethod(self._component_name, attribute)
+
+
+class DeferredProxyMethod (object):
+    
+    def __init__ (self, component_name, func_name):
+        self.component_name = component_name
+        self.func_name = func_name
+    
+    def __call__ (self, *args):
+        component = ComponentProxy(self.component_name)
+        func = getattr(component, self.func_name)
+        return func(*args)
 
 
 def find_configured_servers (config_files=None):
