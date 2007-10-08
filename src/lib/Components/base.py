@@ -77,8 +77,8 @@ def run_component (component, argv=None, register=True, trace=False):
             def foo(x, y, z):
                 return foo
             sys.settrace(foo)
-        finally:
-            server.server_close()
+        
+        server.server_close()
 
 def exposed (func):
     """Mark a method to be exposed publically.
