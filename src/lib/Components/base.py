@@ -77,6 +77,7 @@ def run_component (component, argv=None, register=True, trace=False):
             def foo(x, y, z):
                 return foo
             sys.settrace(foo)
+            raise
         
         server.server_close()
 
