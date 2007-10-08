@@ -9,6 +9,7 @@ load_config -- read configuration files
 
 __revision__ = '$Revision$'
 
+import socket
 from xmlrpclib import ServerProxy, Fault
 from ConfigParser import SafeConfigParser, NoSectionError, NoOptionError
 
@@ -43,8 +44,8 @@ def ComponentProxy (component_name, **kwargs):
     Additional arguments are passed to the ServerProxy constructor.
     """
     
-    if kwargs.get("defer", False):
-        return DeferredProxy(component_name)
+    if kwargs.get("refresh", True):
+        return RefreshingProxy(component_name)
     
     if component_name in local_components:
         return LocalProxy(local_components[component_name])
@@ -82,44 +83,51 @@ class LocalProxy (object):
         self._component = component
     
     def __getattr__ (self, attribute):
-        return LocalProxyMethod(self._component, attribute)
+        return LocalProxyMethod(self, attribute)
 
 
 class LocalProxyMethod (object):
     
-    def __init__ (self, component, func_name):
-        self.component = component
-        self.func_name = func_name
+    def __init__ (self, proxy, func_name):
+        self._proxy = proxy
+        self._func_name = func_name
     
     def __call__ (self, *args):
-        return self.component._dispatch(self.func_name, args)
+        return self._proxy._component._dispatch(self._func_name, args)
 
 
-class DeferredProxy (object):
+class RefreshingProxy (object):
     
-    """Proxy-like object that gets a new proxy for each method call.
+    """Auto-refreshing proxy object.
     
-    This defers component lookup to method call time, rather than
-    proxy instantiation time.
+    Gets a new proxy when it can't connect to a component.
     """
     
     def __init__ (self, component_name):
         self._component_name = component_name
+        self.refresh()
     
     def __getattr__ (self, attribute):
-        return DeferredProxyMethod(self._component_name, attribute)
-
-
-class DeferredProxyMethod (object):
+        return RefreshingProxyMethod(self, attribute)
     
-    def __init__ (self, component_name, func_name):
-        self.component_name = component_name
-        self.func_name = func_name
+    def refresh (self):
+        self._proxy = ComponentProxy(self._component_name, refresh=False)
+
+
+class RefreshingProxyMethod (object):
+    
+    def __init__ (self, proxy, func_name):
+        self._proxy = proxy
+        self._func_name = func_name
     
     def __call__ (self, *args):
-        component = ComponentProxy(self.component_name)
-        func = getattr(component, self.func_name)
-        return func(*args)
+        func = getattr(self._proxy._proxy, self._func_name)
+        try:
+            return func(*args)
+        except socket.error:
+            self._proxy.refresh()
+            func = getattr(self._proxy._proxy, self._func_name)
+            return func(*args)
 
 
 def find_configured_servers (config_files=None):
