@@ -152,7 +152,6 @@ if __name__ == '__main__':
         output = [[q[x] for x in [y.lower() for y in header]] for q in response]
     else:
         if response:
-            print `response[0].get('jobid')`
             maxjoblen = max([len(str(item.get('jobid'))) for item in response])
             jobidfmt = "%%%ss" % maxjoblen
         # calculate derived values
