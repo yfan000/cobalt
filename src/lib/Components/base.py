@@ -62,7 +62,7 @@ def run_component (component, argv=None, register=True, trace=False):
                     filename = filename[:-1]
                 name = frame.f_globals["__name__"]
                 line = linecache.getline(filename, lineno)
-                if name.startswith("Cobalt"):
+                if name.startswith("Cobalt.Components"):
                     logger.error("==> %s:%s: %s" % (name, lineno, line.rstrip()))
             return trace
 

@@ -247,4 +247,7 @@ if __name__ == '__main__':
         logger.error("Error submitting job")
         raise SystemExit, 1
     # log jobid to stdout
-    print job[0]['jobid']
+    if job:
+        print job[0]['jobid']
+    else:
+        print "failed to create teh job.  maybe a queue isn't there"

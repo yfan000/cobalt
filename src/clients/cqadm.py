@@ -72,6 +72,13 @@ if __name__ == '__main__':
            or opts['killq'] or opts['policy']:
         spec = [{'tag':'queue', 'name':qname} for qname in args]
     else:
+        for i in range(len(args)):
+            try:
+                args[i] = int(args[i])
+            except:
+                print >> sys.stderr, "jobid must be an integer"
+                raise SystemExit, 1
+    
         spec = [{'tag':'job', 'jobid':jobid} for jobid in args]
 
     try:

@@ -13,7 +13,7 @@ import Cobalt.Util, Cobalt.Cqparse
 from Cobalt.Data import Data, DataList, DataDict, get_spec_fields, IncrID
 from Cobalt.Components.base import Component, exposed, automatic, query
 from Cobalt.Server import XMLRPCServer, find_intended_location
-from Cobalt.Proxy import ComponentProxy
+from Cobalt.Proxy import ComponentProxy, ComponentLookupError
 
 
 
@@ -1112,7 +1112,7 @@ class QueueDict(DataDict):
         results = []
         for q in self.itervalues():
             results += q.jobs.q_get(specs, callback, cargs)
-            
+
         return results
         
     def del_jobs(self, specs, callback=None, cargs={}):
@@ -1182,25 +1182,25 @@ class QueueManager(Component):
 
     def progress(self):
         '''Process asynchronous job work'''
-        [j.Progress() for j in [j for queue in self.Queues for j in queue] if j.active]
-        overtime_jobs = [j for j in [j for queue in self.Queues for j in queue] if j.over_time() and not j.killed]
+        [j.Progress() for j in [j for queue in self.Queues.itervalues() for j in queue.jobs] if j.active]
+        overtime_jobs = [j for j in [j for queue in self.Queues.itervalues() for j in queue.jobs] if j.over_time() and not j.killed]
         for job in overtime_jobs:
             job.Kill("Job %s Overtime, Killing")
             job.pbslog.log("A",
                 # No attributes.
             )
-        finished_jobs = [j for j in [j for queue in self.Queues for j in queue] if j.state == 'done']
+        finished_jobs = [j for j in [j for queue in self.Queues.itervalues() for j in queue.jobs] if j.state == 'done']
         for job in finished_jobs:
             job.LogFinish()
-        [queue.remove(j) for (j, queue) in [(j, queue) for queue in self.Queues for j in queue] if j.state == 'done']
-        [self.Queues.remove(q) for q in self.Queues.data[:]
-         if q.state == 'dead' and q.name.startswith('R.')
-         and len(q.data) == 0]
+        [queue.remove(j) for (j, queue) in [(j, queue) for queue in self.Queues.itervalues() for j in queue.jobs] if j.state == 'done']
+        for (name, q) in self.Queues.items():
+            if q.state == 'dead' and q.name.startswith('R.') and not q:
+                del self.Queues[name]
         #newdate = time.strftime("%m-%d-%y", time.localtime())
         #[j.acctlog.ChangeLog() for j in [j for queue in self.Queues for j in queue] if newdate != self.prevdate]
         #Job.acctlog.ChangeLog()
         return 1
-    #progress = automatic(progress)
+    progress = automatic(progress)
 
     def add_jobs(self, specs):
         '''Add a job, throws in adminemail'''
@@ -1214,6 +1214,8 @@ class QueueManager(Component):
                 logger.error("trying to add job to non-existant queue %s" % spec['queue'])
                 failed = True
         if failed:
+            # FIXME : throw an exception instead and pass back the same data that got
+            # stuck in the logs
             return []
         
         response = self.Queues.add_jobs(specs)
@@ -1275,34 +1277,34 @@ class QueueManager(Component):
         '''Resynchronize with the process manager'''
         
         try:
-            pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
+            pgroups = ComponentProxy("process-manager").get_jobs([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
         except ComponentLookupError:
             logger.error("Failed to communicate with process manager")
             return
-        live = [item['pgid'] for item in pgs]
-        for job in [j for queue in self.Queues for j in queue if j.mode!='script']:
+        live = [item['pgid'] for item in pgroups]
+        for job in [j for queue in self.Queues.itervalues() for j in queue.jobs if j.mode!='script']:
             for pgtype in job.pgid.keys():
                 pgid = job.pgid[pgtype]
                 if pgid not in live:
                     self.logger.info("Found dead pg for job %s" % (job.jobid))
                     job.CompletePG(pgid)
-    # pm_sync = automatic(pm_sync)
+    pm_sync = automatic(pm_sync)
 
     def sm_sync(self):
         '''Resynchronize with the script manager'''
         try:
-            pgroup = ComponentProxy("script-manager").add_jobs([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
+            pgroups = ComponentProxy("script-manager").get_jobs([{'tag':'process-group', 'pgid':'*', 'state':'running'}])
         except ComponentLookupError:
             logger.error("Failed to communicate with script manager")
             return
-        live = [item['pgid'] for item in pgs]
-        for job in [j for queue in self.Queues for j in queue if j.mode=='script']:
+        live = [item['pgid'] for item in pgroups]
+        for job in [j for queue in self.Queues.itervalues() for j in queue.jobs if j.mode=='script']:
             for pgtype in job.pgid.keys():
                 pgid = job.pgid[pgtype]
                 if pgid not in live:
                     self.logger.info("Found dead pg for job %s" % (job.jobid))
                     job.CompletePG(pgid)
-    # sm_sync = automatic(sm_sync)
+    sm_sync = automatic(sm_sync)
 
     def invoke_mpi_from_script(self, data):
         '''Invoke the real mpirun on behalf of a script being executed by the script manager.'''
@@ -1340,7 +1342,7 @@ class QueueManager(Component):
     def run_jobs(self, specs, nodelist):
         def _run_jobs(job, nodes):
             job.Run(nodes)
-        return self.Queues.get_queues(specs, _run_jobs, nodelist)
+        return self.Queues.get_jobs(specs, _run_jobs, nodelist)
     run_jobs = exposed(query(run_jobs))
 
     def set_jobs(self, specs, updates):

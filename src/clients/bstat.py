@@ -2,7 +2,6 @@
 
 import sys
 import socket
-import operator
 
 from Cobalt.Proxy import *
 
@@ -15,7 +14,6 @@ state_markers = dict(
 def run ():
     system = ComponentProxy("system")
     specs = system.get_partitions([{'name':"*", 'state':"*"}])
-    specs.sort(key=operator.itemgetter("name"))
     format = "%14s | %4s | %4s | %7s"
     print format % ("partition", "idle", "busy", "blocked")
     print "=" * 39
