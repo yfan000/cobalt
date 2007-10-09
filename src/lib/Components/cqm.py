@@ -744,7 +744,7 @@ class BGJob(Job):
                     mode = self.mode,
                     cwd = self.outputdir,
                     executable = self.command,
-                    args = self.args
+                    args = self.args,
                     env = self.envs,
                     location = [self.location],
                     id = self.jobid,
