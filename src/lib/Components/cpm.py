@@ -10,6 +10,8 @@ from Cobalt.Components.base import Component, exposed, automatic, query
 
 __all__ = ["Job", "JobDict", "ProcessManager"]
 
+logger = logging.getLogger(__name__)
+
 
 class Job (Cobalt.Data.Job):
     
@@ -36,7 +38,7 @@ class ProcessManager (Component):
     
     name = "process-manager"
     
-    logger = logging.getLogger("Cobalt.Component.ProcessManager")
+    logger = logger
 
     def __init__ (self, **kwargs):
         Component.__init__(self, **kwargs)
@@ -44,6 +46,7 @@ class ProcessManager (Component):
     
     def add_jobs (self, specs):
         """Add a job to the process manager."""
+        self.logger.info("add_jobs(%r)" % (specs))
         jobs = self.jobs.q_add(specs)
         system_specs = \
             ComponentProxy("system").add_jobs([job.to_rx() for job in jobs])
@@ -55,11 +58,13 @@ class ProcessManager (Component):
     
     def get_jobs (self, specs):
         """Query jobs from the process mananger."""
+        self.logger.info("get_jobs(%r)" % (specs))
         return self.jobs.q_get(specs)
     get_jobs = exposed(query(get_jobs))
     
     def wait_jobs (self, specs):
         """Removes and returns jobs that have finished."""
+        self.logger.info("wait_jobs(%r)" % (specs))
         specs = [spec.copy() for spec in specs]
         for spec in specs:
             spec['state'] = "finished"
@@ -68,11 +73,13 @@ class ProcessManager (Component):
     
     def signal_jobs (self, specs, signame="SIGTERM"):
         """Send a signal to existing job processes."""
+        self.logger.info("signal_jobs(%r, %r)" % (specs, signame))
         return ComponentProxy("system").signal_jobs(specs, signame)
     signal_jobs = exposed(signal_jobs)
 
     def check_jobs (self):
         """Finish jobs that are no longer running on the system."""
+        self.logger.info("check_jobs()")
         local_job_specs = [job.to_rx(["id"]) for job in self.jobs.values()]
         try:
             system_job_specs = ComponentProxy("system").get_jobs(local_job_specs)

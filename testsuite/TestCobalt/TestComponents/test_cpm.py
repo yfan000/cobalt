@@ -16,7 +16,7 @@ class TestProcessManager (TestComponent):
     def setup (self):
         TestComponent.setup(self)
         self.cpm = ProcessManager()
-        self.system = Simulator("simulator.xml")
+        self.system = Simulator(config_file="simulator.xml")
     
     def test_add_jobs (self):
         assert not self.cpm.jobs

@@ -35,6 +35,8 @@ __all__ = [
     "Simulator",
 ]
 
+logger = logging.getLogger(__name__)
+
 
 class JobCreationError (Exception):
     """An error occured when creation a job."""
@@ -172,17 +174,14 @@ class Simulator (Component):
     name = "system"
     implementation = "simulator"
     
-    logger = logging.getLogger("Cobalt.Components.Simulator")
+    logger = logger
 
-    def __init__ (self, config_file=None, *args, **kwargs):
-        """Initialize a system simulator.
-        
-        Arguments:
-        config_file -- automatically configure using this xml file (optional)
-        """
+    def __init__ (self, *args, **kwargs):
+        """Initialize a system simulator."""
         Component.__init__(self, *args, **kwargs)
         self.partitions = PartitionDict()
         self.jobs = JobDict()
+        config_file = kwargs.get("config_file", None)
         if config_file is not None:
             self.configure(config_file)
     
@@ -194,6 +193,7 @@ class Simulator (Component):
         config_file -- xml configuration file
         """
         
+        self.logger.info("configure()")
         system_doc = lxml.etree.parse(config_file)
         system_def = system_doc.getroot()
         
@@ -234,6 +234,7 @@ class Simulator (Component):
         I -- partition is in use
         F -- partition is free
         """
+        self.logger.info("get_state()")
         busy_partitions = self.partitions.q_get([{'state':"busy"}])
         return [
             (partition.name, partition in busy_partitions and 'I' or 'F')
@@ -243,8 +244,8 @@ class Simulator (Component):
     
     def get_partitions (self, specs):
         """Query partitions on simulator."""
-        partitions = self.partitions.q_get(specs)
-        return partitions
+        self.logger.info("get_partitions(%r)" % (specs))
+        return self.partitions.q_get(specs)
     get_partitions = exposed(query(get_partitions))
     
     def reserve_partition (self, name, size=None):
@@ -373,6 +374,7 @@ class Simulator (Component):
         spec -- dictionary hash specifying a job to start
         """
         
+        self.logger.info("add_jobs(%r)" % (specs))
         def jobspec (spec):
             uid, gid = self._get_owner(spec)
             jobspec = dict(
@@ -405,6 +407,7 @@ class Simulator (Component):
     
     def signal_jobs (self, specs, signame="SIGINT"):
         """Simulate the signaling of a job."""
+        self.logger.info("signal_jobs(%r, %r)" % (specs, signame))
         if signame == "SIGKILL":
             return self.del_jobs(specs)
         else:
@@ -418,6 +421,7 @@ class Simulator (Component):
         At the end of a jobs execution, this method calls simulator.mpirun
         to product appropriate output.
         """
+        self.logger.info("run_jobs()")
         for job in self.jobs.values():
             job.runtime -= 1
         finished_jobs = self.jobs.q_del([{'runtime':0}])

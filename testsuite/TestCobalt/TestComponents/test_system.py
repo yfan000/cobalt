@@ -14,7 +14,7 @@ class TestSimulator (TestComponent):
     
     def setup (self):
         TestComponent.setup(self)
-        self.system = Simulator("simulator.xml")
+        self.system = Simulator(config_file="simulator.xml")
         log_to_stderr(self.system.logger)
     
     def test_init_configure (self):
@@ -22,7 +22,7 @@ class TestSimulator (TestComponent):
         assert os.path.exists(config_file)
         system = Simulator()
         assert not system.partitions
-        system = Simulator(config_file)
+        system = Simulator(config_file=config_file)
         assert system.partitions
     
     def test_configure (self):

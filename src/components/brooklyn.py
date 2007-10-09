@@ -35,7 +35,12 @@ def run (argv=None):
             config_file = item[1]
     
     Cobalt.Logging.setup_logging('brooklyn', level=log_level)
-    simulator = Simulator(config_file='simulator.xml')
+    simulator = Simulator()
+    try:
+        simulator.configure("simulator.xml")
+    except IOError:
+        print >> sys.stderr, "unable to load simulator.xml from the current directory"
+        return
     
     location = find_intended_location(simulator, config_files=[config_file])
     server = XMLRPCServer(location, keyfile="/etc/cobalt.key", certfile="/etc/cobalt.key")
