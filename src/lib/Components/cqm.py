@@ -735,11 +735,21 @@ class BGJob(Job):
                 self.pgid['user'] = pgroup[0]['pgid']
         else:
             try:
-                pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'user':self.user, 'pgid':'*', 'outputfile':self.outputpath,
-                     'errorfile':self.errorpath, 'path':self.path, 'size':self.procs,
-                     'mode':self.mode, 'cwd':self.outputdir, 'executable':self.command,
-                     'args':self.args, 'envs':self.envs, 'location':[self.location],
-                     'jobid':self.jobid, 'inputfile':self.inputfile, 'kerneloptions':self.kerneloptions}])
+                pgroup = ComponentProxy("process-manager").add_jobs([dict(
+                    user = self.user,
+                    stdin = self.inputfile,
+                    stdout = self.outputpath,
+                    stderr = self.errorpath,
+                    size = self.procs,
+                    mode = self.mode,
+                    cwd = self.outputdir,
+                    executable = self.command,
+                    args = self.args
+                    env = self.envs,
+                    location = [self.location],
+                    id = self.jobid,
+                    kerneloptions = self.kerneloptions,
+                )])
             except ComponentLookupError:
                 logger.error("Failed to communicate with process manager")
                 raise ProcessManagerError
