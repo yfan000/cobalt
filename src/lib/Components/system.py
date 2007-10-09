@@ -341,7 +341,7 @@ class Simulator (Component):
         ])
         
         try:
-            partition = spec["location"]
+            partition = spec["location"][0]
         except (KeyError, IndexError):
             raise JobCreationError("location")
         argv.extend(["-partition", partition])

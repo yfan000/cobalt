@@ -728,11 +728,11 @@ class BGJob(Job):
                 logger.error("Failed to communicate with script manager")
                 raise ScriptManagerError
             
-            if not pgroup[0].has_key('pgid'):
+            if not pgroup[0].has_key('id'):
                 logger.error("Process Group creation failed for Job %s" % self.jobid)
                 self.state = 'sm-failure'
             else:
-                self.pgid['user'] = pgroup[0]['pgid']
+                self.pgid['user'] = pgroup[0]['id']
         else:
             try:
                 pgroup = ComponentProxy("process-manager").add_jobs([dict(
@@ -754,11 +754,11 @@ class BGJob(Job):
                 logger.error("Failed to communicate with process manager")
                 raise ProcessManagerError
             
-            if not pgroup[0].has_key('pgid'):
+            if not pgroup[0].has_key('id'):
                 logger.error("Process Group creation failed for Job %s" % self.jobid)
                 self.state = 'pm-failure'
             else:
-                self.pgid['user'] = pgroup[0]['pgid']
+                self.pgid['user'] = pgroup[0]['id']
             
         self.SetPassive()
 
@@ -1202,7 +1202,10 @@ class QueueManager(Component):
         finished_jobs = [j for j in [j for queue in self.Queues.itervalues() for j in queue.jobs] if j.state == 'done']
         for job in finished_jobs:
             job.LogFinish()
-        [queue.remove(j) for (j, queue) in [(j, queue) for queue in self.Queues.itervalues() for j in queue.jobs] if j.state == 'done']
+        for (j, queue) in [(j, queue) for queue in self.Queues.itervalues() for j in queue.jobs]:
+            if j.state == 'done':
+                queue.jobs.q_del([{'jobid':j.jobid}])
+        
         for (name, q) in self.Queues.items():
             if q.state == 'dead' and q.name.startswith('R.') and not q:
                 del self.Queues[name]
