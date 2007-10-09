@@ -62,7 +62,7 @@ def ComponentProxy (component_name, **kwargs):
             raise ComponentLookupError(component_name)
         if not address:
             raise ComponentLookupError(component_name)
-        return ServerProxy(address)
+        return ServerProxy(address, allow_none=True)
     else:
         raise ComponentLookupError(component_name)
 
