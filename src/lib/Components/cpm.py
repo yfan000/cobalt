@@ -80,7 +80,7 @@ class ProcessManager (Component):
     def check_jobs (self):
         """Finish jobs that are no longer running on the system."""
         self.logger.info("check_jobs()")
-        local_job_specs = [job.to_rx(["id"]) for job in self.jobs.values()]
+        local_job_specs = [job.to_rx(["id"]) for job in self.jobs.values() if job.state != 'finished']
         try:
             system_job_specs = ComponentProxy("system").get_jobs(local_job_specs)
         except ComponentLookupError:
