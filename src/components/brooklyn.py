@@ -8,10 +8,13 @@ from Cobalt.Components.system import Simulator
 from Cobalt.Server import XMLRPCServer, find_intended_location
 import Cobalt.Logging
 
-if __name__ == "__main__":
+def run (argv=None):
+    
+    if argv is None:
+        argv = sys.argv
     
     try:
-        (opts, arguments) = getopt(sys.argv[1:], 'C:D:dt:f:', [])
+        (opts, arguments) = getopt(argv[1:], 'C:D:dt:f:', [])
     except GetoptError, e:
         print >> sys.stderr, e
         print >> sys.stderr, "Usage:"
@@ -39,9 +42,16 @@ if __name__ == "__main__":
     server.register_instance(simulator)
     
     if daemon:
-        server.serve_daemon(pidfile=pidfile)
+        server.serve_daemon(pidfile)
     else:
         try:
             server.serve_forever()
         finally:
             server.server_close()
+
+
+if __name__ == "__main__":
+    try:
+        run()
+    except KeyboardInterrupt:
+        pass

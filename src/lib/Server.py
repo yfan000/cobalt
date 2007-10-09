@@ -18,6 +18,8 @@ import signal
 from ConfigParser import SafeConfigParser, NoSectionError, NoOptionError
 import logging
 import urlparse
+import threading
+import time
 
 import tlslite.integration.TLSSocketServerMixIn
 import tlslite.api
@@ -307,27 +309,41 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         self.register_function(self.ping)
         self.logger.info("service available at %s" % self.url)
     
+    def _get_register (self):
+        return self._register
+    
+    def _set_register (self, value):
+        old_value = getattr(self, "_register", False)
+        self._register = value
+        if value and not old_value:
+            thread = threading.Thread(target=self._slp_thread)
+            thread.setDaemon(True)
+            thread.start()
+    
+    register = property(_get_register, _set_register)
+    
     def register_instance (self, instance, *args, **kwargs):
         SimpleXMLRPCDispatcher.register_instance(self, instance, *args, **kwargs)
-        if self.register:
-            self.register_with_slp()
         try:
             name = instance.name
         except AttributeError:
             name = "unknown"
+        if self.register:
+            self.register_with_slp()
         self.logger.info("serving %s at %s" % (name, self.url))
     
     def register_with_slp (self):
         try:
             name = self.instance.name
         except AttributeError:
-            name = "unknown"
+            self.logger.error("register_with_slp() [unknown component]")
+            return
         try:
             ComponentProxy("service-location").register(name, self.url)
         except Exception, e:
-            self.logger.info("unable to notify service-location [%s]" % (e))
+            self.logger.error("register_with_slp() [%s]" % (e))
         else:
-            self.logger.info("notified service-location [register]")
+            self.logger.info("register_with_slp()")
     
     def unregister_with_slp (self):
         try:
@@ -337,15 +353,21 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         try:
             ComponentProxy("service-location").unregister(name)
         except Exception, e:
-            self.logger.info("unable to notify service-location [%s]" % (e))
+            self.logger.error("unregister_with_slp() [%s]" % (e))
         else:
-            self.logger.info("notified service-location [unregister]")
+            self.logger.info("unregister_with_slp()")
+    
+    def _slp_thread (self, frequency=180):
+        while self.register:
+            self.register_with_slp()
+            time.sleep(frequency)
     
     def server_close (self):
         TCPServer.server_close(self)
         if self.register:
+            self.register = False
             self.unregister_with_slp()
-        self.logger.info("server closed")
+        self.logger.info("server_close()")
     
     def _get_require_auth (self):
         return getattr(self.RequestHandlerClass, "require_auth", False)
@@ -362,7 +384,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         self.RequestHandlerClass.credentials = value
     credentials = property(_get_credentials, _set_credentials)
     
-    def serve_daemon (self, pidfile=None):
+    def serve_daemon (self, pidfile_name=None):
         
         """Implement serve_forever inside a daemon.
         
@@ -388,11 +410,11 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
         os.chdir(os.sep)
         os.umask(0)
         
-        pidfile = open(pidfile or os.devnull, "w")
+        pidfile = open(pidfile_name or os.devnull, "w")
         print >> pidfile, os.getpid()
         pidfile.close()
         
-        self.logger.info("daemon at %s" % (os.getpid()))
+        self.logger.info("serve_daemon(%r) [%s]" % (pidfile_name, os.getpid()))
         
         self.serve_forever()
         self.server_close()
@@ -401,7 +423,7 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
     def serve_forever (self):
         """Serve single requests until (self.serve == False)."""
         self.serve = True
-        self.logger.info("start handling requests")
+        self.logger.info("serve_forever() [start]")
         #sigint = signal.signal(signal.SIGINT, self._handle_shutdown_signal)
         #sigterm = signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
         try:
@@ -412,12 +434,10 @@ class XMLRPCServer (TCPServer, SimpleXMLRPCDispatcher, object):
                     pass
                 if self.instance and hasattr(self.instance, "do_tasks"):
                     self.instance.do_tasks()
-                if self.register:
-                    self.register_with_slp()
         finally:
             #signal.signal(signal.SIGINT, sigint)
             #signal.signal(signal.SIGTERM, sigterm)
-            self.logger.info("stop handling requests")
+            self.logger.info("serve_forever() [stop]")
     
     def shutdown (self):
         """Signal that automatic service should stop."""

@@ -12,6 +12,7 @@ import struct
 import sys
 import termios
 import types
+import linecache
 
 def print_attributes(attrib):
     ''' Add the attributes for an element'''
@@ -151,6 +152,36 @@ def setup_logging(procname, to_console=True, to_syslog=True, syslog_facility='lo
             logging.root.error("failed to activate syslogging")
     logging.root.setLevel(level)
     logging.already_setup = True
+
+def trace_process (**kwargs):
+    
+    """Literally log every line of python code as it runs.
+    
+    Keyword arguments:
+    log -- file (name) to log to (default stderr)
+    scope -- base scope to log to (default Cobalt)"""
+    
+    file_name = kwargs.get("log", None)
+    if file_name is not None:
+        log_file = open(file_name, "w")
+    else:
+        log_file = sys.stderr
+    
+    scope = kwargs.get("scope", "Cobalt")
+    
+    def traceit (frame, event, arg):
+        if event == "line":
+            lineno = frame.f_lineno
+            filename = frame.f_globals["__file__"]
+            if (filename.endswith(".pyc") or
+                filename.endswith(".pyo")):
+                filename = filename[:-1]
+            name = frame.f_globals["__name__"]
+            line = linecache.getline(filename, lineno)
+            print >> log_file, "%s:%s: %s" % (name, lineno, line.rstrip())
+        return traceit
+    
+    sys.settrace(traceit)
 
 def log_to_stderr (logger_name, level=logging.INFO):
     """Set up console logging."""

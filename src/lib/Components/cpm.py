@@ -4,7 +4,7 @@ import logging
 
 import Cobalt.Data
 from Cobalt.Data import Data, DataDict, IncrID
-from Cobalt.Proxy import ComponentProxy
+from Cobalt.Proxy import ComponentProxy, ComponentLookupError
 from Cobalt.Components.base import Component, exposed, automatic, query
 
 
@@ -74,7 +74,11 @@ class ProcessManager (Component):
     def check_jobs (self):
         """Finish jobs that are no longer running on the system."""
         local_job_specs = [job.to_rx(["id"]) for job in self.jobs.values()]
-        system_job_specs = ComponentProxy("system").get_jobs(local_job_specs)
+        try:
+            system_job_specs = ComponentProxy("system").get_jobs(local_job_specs)
+        except ComponentLookupError:
+            self.logger.error("check_jobs() [unable to contact system]")
+            return
         system_job_ids = [spec['id'] for spec in system_job_specs]
         for job in self.jobs.values():
             if job.id not in system_job_ids and job.state != "finished":

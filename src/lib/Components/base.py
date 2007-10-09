@@ -17,7 +17,7 @@ import Cobalt.Logging
 from Cobalt.Server import XMLRPCServer, find_intended_location
 from Cobalt.Data import get_spec_fields
 
-def run_component (component, argv=None, register=True, trace=False):
+def run_component (component, argv=None, register=True):
     if argv is None:
         argv = sys.argv
     try:
@@ -48,38 +48,14 @@ def run_component (component, argv=None, register=True, trace=False):
     server.logger.setLevel(logging.INFO)
     Cobalt.Logging.log_to_stderr(server.logger)
     server.register_instance(component)
-
-    if trace:
-        import linecache
-        logger = logging.getLogger('trace')
-        Cobalt.Logging.log_to_stderr(logger)
-        def trace(frame, event, arg):
-            if event == "line":
-                lineno = frame.f_lineno
-                filename = frame.f_globals["__file__"]
-                if (filename.endswith(".pyc") or
-                    filename.endswith(".pyo")):
-                    filename = filename[:-1]
-                name = frame.f_globals["__name__"]
-                line = linecache.getline(filename, lineno)
-                if name.startswith("Cobalt.Components"):
-                    logger.error("==> %s:%s: %s" % (name, lineno, line.rstrip()))
-            return trace
-
-        sys.settrace(trace)
     
     if daemon:
-        server.serve_daemon(pidfile=pidfile)
+        server.serve_daemon(pidfile)
     else:
         try:
             server.serve_forever()
-        except:
-            def foo(x, y, z):
-                return foo
-            sys.settrace(foo)
-            raise
-        
-        server.server_close()
+        finally:
+            server.server_close()
 
 def exposed (func):
     """Mark a method to be exposed publically.

@@ -7,6 +7,6 @@ from Cobalt.Components.base import run_component
 
 try:
     cqm = QueueManager()
-    run_component(cqm, register=True, trace=True)
+    run_component(cqm, register=True)
 except KeyboardInterrupt:
     pass
