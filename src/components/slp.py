@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''slp provides the service location protocol'''
-__revision__ = '$Revision:$'
+__revision__ = '$Revision$'
 
 from select import select, error as selecterror
 from time import time
