@@ -899,7 +899,7 @@ if __name__ == '__main__':
     scheduler = Cobalt.Proxy.scheduler()
     reservations = {}
     npart = {}
-    partitions = scheduler.GetPartition([{'size':'*', 'tag':'partition', 'name':'*', 'reservations':'*', 'deps':'*'}])
+    partitions = scheduler.GetPartition([{'size':'*', 'tag':'partition', 'name':'*', 'reservations':'*', 'deps':'*', 'xdeps':'*'}])
 
     [npart.__setitem__(partition.get('name'), partition) for partition in partitions]
     # builds topology; key = partition, val = ((parents), (children))

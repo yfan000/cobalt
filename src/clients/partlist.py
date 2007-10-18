@@ -21,7 +21,7 @@ if __name__ == '__main__':
         raise SystemExit, 1
 
     parts = sched.GetPartition([{'tag':'partition', 'name':'*', 'queue':'*', 'state':'*', \
-                                 'scheduled':'*', 'functional':'*', 'deps':'*'}])
+                                 'scheduled':'*', 'functional':'*', 'deps':'*', 'xdeps':'*'}])
     partinfo = Cobalt.Util.buildRackTopology(parts)
     # need to cascade up busy
     busy = [part['name'] for part in parts if part['state'] == 'busy']

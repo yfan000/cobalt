@@ -89,7 +89,7 @@ if __name__ == '__main__':
         extra_inclusive = []
         extra_exclusive = []
         parts = scheduler.GetPartition([{'tag':'partition', 'name':'*', 'queue':'*', 'state':'*', \
-                                     'scheduled':'*', 'functional':'*', 'deps':'*'}])
+                                     'scheduled':'*', 'functional':'*', 'deps':'*', 'xdeps':'*'}])
         partinfo = Cobalt.Util.buildRackTopology(parts)
         try:
             for part in partitions:

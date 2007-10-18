@@ -60,7 +60,7 @@ if __name__ == '__main__':
     allparts = []
     scheduler = Cobalt.Proxy.scheduler()
     parts = scheduler.GetPartition([{'tag':'partition', 'name':'*', 'queue':'*', 'state':'*', \
-                                     'scheduled':'*', 'functional':'*', 'deps':'*'}])
+                                     'scheduled':'*', 'functional':'*', 'deps':'*', 'xdeps':'*'}])
     partinfo = Cobalt.Util.buildRackTopology(parts)
     try:
         for part in partition:

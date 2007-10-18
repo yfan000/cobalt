@@ -18,7 +18,7 @@ if __name__ == '__main__':
         print "Failed to connect to scheduler"
         raise SystemExit, 1
     reservations = {}
-    partitions = scheduler.GetPartition([{'size':'*', 'tag':'partition', 'name':'*', 'reservations':'*', 'deps':'*'}])
+    partitions = scheduler.GetPartition([{'size':'*', 'tag':'partition', 'name':'*', 'reservations':'*', 'deps':'*', 'xdeps':'*'}])
     npart = {}
     [npart.__setitem__(partition.get('name'), partition) for partition in partitions]
     depinfo = Cobalt.Util.buildRackTopology(partitions)

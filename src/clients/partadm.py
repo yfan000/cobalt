@@ -13,6 +13,7 @@ Usage: partadm.py [--activate|--deactivate] part1 part2 (functional or not)
 Usage: partadm.py [--enable|--disable] part1 part2 (scheduleable or not)
 Usage: partadm.py --queue=queue1:queue2 part1 part2
 Usage: partadm.py --deps=dep1:dep2 part1 part2
+Usage: partadm.py --xdeps=dep1:dep2 part1 part2
 Usage: partadm.py --free part1 part2
 Usage: partadm.py --dump
 Usage: partadm.py --load <filename>
@@ -27,7 +28,7 @@ if __name__ == '__main__':
     try:
         (opts, args) = getopt.getopt(sys.argv[1:], 'adlrs:',
                                      ['dump', 'free', 'load=', 'enable', 'disable', 'activate', 'deactivate',
-                                      'queue=', 'deps='])
+                                      'queue=', 'deps=', 'xdeps='])
     except getopt.GetoptError, msg:
         print msg
         print helpmsg
@@ -41,7 +42,7 @@ if __name__ == '__main__':
     if '-r' in sys.argv:
         partdata = sched.GetPartition([{'tag':'partition', 'name':'*', 'queue':'*',
                                         'state':'*', 'scheduled':'*', 'functional':'*',
-                                        'deps':'*'}])
+                                        'deps':'*', 'xdeps':'*'}])
         partinfo = Cobalt.Util.buildRackTopology(partdata)
         parts = args
         for part in args:
@@ -58,7 +59,7 @@ if __name__ == '__main__':
             print "Must supply partition size with -s"
             raise SystemExit, 1
         args = ([{'tag':'partition', 'name':partname, 'size':int(size), 'functional':False,
-                  'scheduled':False, 'queue':'default', 'deps':[]} for partname in parts], )
+                  'scheduled':False, 'queue':'default', 'deps':[], 'xdeps':[]} for partname in parts], )
     elif '-d' in sys.argv:
         func = sched.DelPartition
         args = ([{'tag':'partition', 'name':partname} for partname in parts], )
@@ -81,7 +82,7 @@ if __name__ == '__main__':
     elif '-l' in sys.argv:
         func = sched.GetPartition
         args = ([{'tag':'partition', 'name':'*', 'size':'*', 'state':'*', 'scheduled':'*', 'functional':'*',
-                  'queue':'*', 'deps':'*'}], )
+                  'queue':'*', 'deps':'*', 'xdeps':'*'}], )
     elif '--queue' in [opt for (opt, arg)  in opts]:
         try:
             cqm = Cobalt.Proxy.queue_manager()
@@ -96,17 +97,22 @@ if __name__ == '__main__':
         func = sched.Set
         args = ([{'tag':'partition', 'name':partname} for partname in parts],
                 {'queue':queue})
-    elif '--deps' in [opt for (opt, arg) in opts]:
-        deps = [arg for (opt, arg) in opts if opt == '--deps'][0]
-        func = sched.Set
-        args = ([{'tag':'partition', 'name':partname} for partname in parts], {'deps':deps.split(':')})
+    elif '--deps' in [opt for (opt, arg) in opts] or '--xdeps' in [opt for (opt, arg) in opts]:
+        if '--deps' in [opt for (opt, arg) in opts]:
+            deps = [arg for (opt, arg) in opts if opt == '--deps'][0]
+            func = sched.Set
+            args = ([{'tag':'partition', 'name':partname} for partname in parts], {'deps':deps.split(':')})
+        if '--xdeps' in [opt for (opt, arg) in opts]:
+            deps = [arg for (opt, arg) in opts if opt == '--xdeps'][0]
+            func = sched.Set
+            args = ([{'tag':'partition', 'name':partname} for partname in parts], {'xdeps':deps.split(':')})
     elif '--free' in [opt for (opt, arg) in opts]:
         func = sched.Set
         args = ([{'tag':'partition', 'name':partname} for partname in parts], {'state':'idle'})
     elif '--dump' in [opt for (opt, arg) in opts]:
         func = sched.GetPartition
         args = ([{'tag':'partition', 'name':'*', 'size':'*', 'state':'*', 'functional':'*',
-                  'scheduled':'*', 'queue':'*', 'deps':'*'}], )
+                  'scheduled':'*', 'queue':'*', 'deps':'*', 'xdeps':'*'}], )
     else:
         print helpmsg
         raise SystemExit, 1
@@ -132,8 +138,13 @@ if __name__ == '__main__':
                       if down in partinfo[part['name']][0] + partinfo[part['name']][1]]]
         [part.__setitem__('functional', '-') for part in forced]
         data = [['Name', 'Queue', 'Size', 'Functional', 'Scheduled', 'State', 'Dependencies']]
-        data += [[part['name'], part['queue'], part['size'], part['functional'], part['scheduled'],
-                  part['state'], ','.join(part['deps'])] for part in parts]
+        for part in parts:
+            if len(part['xdeps'])>0:
+                data += [[part['name'], part['queue'], part['size'], part['functional'], part['scheduled'],
+                          part['state'], ','.join(part['deps']) + ' @' + ','.join(part['xdeps'])]]
+            else:
+                data += [[part['name'], part['queue'], part['size'], part['functional'], part['scheduled'],
+                          part['state'], ','.join(part['deps'])]]
         Cobalt.Util.printTabular(data, centered=[3, 4])
     else:
         print parts

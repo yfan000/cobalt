@@ -141,6 +141,13 @@ def buildRackTopology(partlist):
             next = children.pop()
             partinfo[part['name']][1].append(next)
             children += partport[next]['deps']
+            
+        # these are the children whose children we don't want expanded
+        for p in part['xdeps']:
+            if p in partinfo[part['name']][1]:
+                continue
+            partinfo[part['name']][1].append(p)
+            
     return partinfo
 
 def sendemail(toaddr, subj, msg, smtpserver = 'localhost'):

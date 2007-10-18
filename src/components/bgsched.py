@@ -293,7 +293,7 @@ class PartitionSet(Cobalt.Data.DataSet):
             #print "after db2 check"
 
             # now we get dependency info
-            depsrc = [part.to_rx({'tag':'partition', 'name':'*', 'deps':'*'}) for part in self.data]
+            depsrc = [part.to_rx({'tag':'partition', 'name':'*', 'deps':'*', 'xdeps':'*'}) for part in self.data]
             depinfo = Cobalt.Util.buildRackTopology(depsrc)
 
             # kill for deps already in use
