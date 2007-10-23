@@ -143,7 +143,7 @@ def buildRackTopology(partlist):
             children += partport[next]['deps']
             
         # these are the children whose children we don't want expanded
-        for p in part['xdeps']:
+        for p in part.get('xdeps', []):
             if p in partinfo[part['name']][1]:
                 continue
             partinfo[part['name']][1].append(p)
