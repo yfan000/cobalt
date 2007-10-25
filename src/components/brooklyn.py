@@ -12,7 +12,7 @@ class Brooklyn(Cobalt.Component.Component):
     def __init__(self, setup):
         Cobalt.Component.Component.__init__(self, setup)
         self.partitions = {}
-        self.readConfigFile('/home/desai/partitions.xml')
+        self.readConfigFile('../../misc/partitions.xml')
         self.used = []
         self.blocked = []
         self.register_function(self.GetMachineState, "GetState")
