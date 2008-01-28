@@ -325,7 +325,7 @@ class Job (Data):
                 if self.mode == 'script':
                     result = ComponentProxy("script-manager").wait_jobs([{'id':self.spgid['user'], 'exit_status':'*'}])
                 else:
-                    result = ComponentProxy("process-manager").wait_jobs([{'id':self.spgid['user'], 'exit_status':'*'}])
+                    result = ComponentProxy("system").wait_process_groups([{'id':self.spgid['user'], 'exit_status':'*'}])
                 if result:
                     self.exit_status = result[0].get('exit_status')
                 #this seems needed to get the info back into the object so it can be handed back to the filestager.
@@ -403,15 +403,25 @@ class Job (Data):
         errorfile = "%s/%s.error" % (self.outputdir, self.jobid)
         cwd = self.cwd or self.envs['data']['PWD']
         env = self.envs['data']
-        
+        env['path'] = ":".join([env.get("path", ""), "/bin:/usr/bin:/usr/local/bin"])
         try:
-            pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'user':self.user, 'id':'*', 'executable':'/usr/bin/mpish',
-                 'size':self.procs, 'args':args, 'envs':env, 'stderr':errorfile,
-                 'stdout':outputfile, 'location':location, 'cwd':cwd, 'path':"/bin:/usr/bin:/usr/local/bin",
-                 'stdin':self.inputfile, 'kerneloptions':self.kerneloptions}])
+            pgroup = ComponentProxy("system").add_process_groups([{
+                'tag':'process-group',
+                'user':self.user,
+                'id':'*',
+                'executable':'/usr/bin/mpish',
+                'size':self.procs,
+                'args':args,
+                'env':env,
+                'stdin':self.inputfile,
+                'stderr':errorfile,
+                'stdout':outputfile,
+                'location':location,
+                'cwd':cwd,
+                'kerneloptions':self.kerneloptions}])
         except ComponentLookupError:
             logger.error("Failed to communicate with process manager")
-            raise ProcessManagerError
+            raise ProcessManagerError()
         self.pgid['user'] = pgroup[0]['id']
         self.SetPassive()
 
@@ -451,12 +461,19 @@ class Job (Data):
     def AdminStart(self, cmd):
         '''Run an administrative job step'''
         location = self.location.split(':')
-        
         try:
-            pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'id':'*', 'user':'root', 'size':self.nodes,
-                 'path':"/bin:/usr/bin:/usr/local/bin", 'cwd':'/', 'executable':cmd, 'envs':{},
-                 'args':[self.user], 'location':location, 'stdin':self.inputfile,
-                 'kerneloptions':self.kerneloptions}])
+            process_groups = ComponentProxy("system").add_process_groups([{
+                'tag':'process-group',
+                'id':'*',
+                'user':'root',
+                'size':self.nodes,
+                'cwd':'/',
+                'executable':cmd,
+                'env':{'path':"/bin:/usr/bin:/usr/local/bin"},
+                'args':[self.user],
+                'location':location,
+                'stdin':self.inputfile,
+                'kerneloptions':self.kerneloptions}])
         except ComponentLookupError:
             logger.error("Failed to communicate with process manager")
             raise ProcessManagerError
@@ -484,7 +501,7 @@ class Job (Data):
                 logger.error("Failed to communicate with script manager")
                 raise ScriptManagerError
         try:
-            pgroup = ComponentProxy("process-manager").signal_jobs([{'id':pgid}], "SIGTERM")
+            pgroup = ComponentProxy("system").signal_process_groups([{'id':pgid}], "SIGTERM")
         except ComponentLookupError:
             logger.error("Failed to communicate with process manager")
             raise ProcessManagerError
@@ -746,22 +763,21 @@ class BGJob(Job):
                 self.pgid['user'] = pgroup[0]['id']
         else:
             try:
-                pgroup = ComponentProxy("process-manager").add_jobs([dict(
-                    user = self.user,
-                    stdin = self.inputfile,
-                    stdout = self.outputpath,
-                    stderr = self.errorpath,
-                    size = self.procs,
-                    mode = self.mode,
-                    cwd = self.outputdir,
-                    executable = self.command,
-                    args = self.args,
-                    env = self.envs,
-                    location = [self.location],
-                    id = self.jobid,
-                    kerneloptions = self.kerneloptions,
-                    walltime = self.walltime,
-                )])
+                pgroup = ComponentProxy("system").add_process_groups([{
+                    'user':self.user,
+                    'stdin':self.inputfile,
+                    'stdout':self.outputpath,
+                    'stderr':self.errorpath,
+                    'size':self.procs,
+                    'mode':self.mode,
+                    'cwd':self.outputdir,
+                    'executable':self.command,
+                    'args':self.args,
+                    'env':self.envs,
+                    'location':[self.location],
+                    'id':"*",
+                    'kerneloptions':self.kerneloptions,
+                }])
             except ComponentLookupError:
                 logger.error("Failed to communicate with process manager")
                 raise ProcessManagerError
@@ -898,12 +914,18 @@ class ScriptMPIJob (Job):
             self.errorpath = "%s/%s.error" % (self.outputdir, self.jobid)
 
         try:
-            pgroup = ComponentProxy("process-manager").add_jobs([{'tag':'process-group', 'user':self.user, 
-                                        'stdout':self.outputpath, 'stderr':self.errorpath, 
-                                        'path':self.path, 'cwd':self.outputdir, 
-                                        'location':[self.location], 'id':self.jobid, 
-                                        'stdin':self.inputfile, 'true_mpi_args':self.true_mpi_args, 
-                                        'envs':{}, 'size':0, 'executable':"this will be ignored"}])
+            pgroup = ComponentProxy("system").add_process_groups([{
+                'tag':'process-group',
+                'user':self.user, 
+                'stdout':self.outputpath,
+                'stderr':self.errorpath,
+                'cwd':self.outputdir, 
+                'location':[self.location],
+                'stdin':self.inputfile,
+                'true_mpi_args':self.true_mpi_args, 
+                'envs':{'path':self.path},
+                'size':0,
+                'executable':"this will be ignored"}])
         except ComponentLookupError:
             logger.error("Failed to communicate with process manager")
             raise ProcessManagerError
@@ -1343,7 +1365,7 @@ class QueueManager(Component):
         '''Resynchronize with the process manager'''
         
         try:
-            pgroups = ComponentProxy("process-manager").get_jobs([{'id':'*', 'state':'running'}])
+            pgroups = ComponentProxy("system").get_process_groups([{'id':'*', 'state':'running'}])
         except ComponentLookupError:
             logger.error("Failed to communicate with process manager")
             return
