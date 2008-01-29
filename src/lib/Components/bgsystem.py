@@ -171,15 +171,15 @@ class ProcessGroup (Data):
         self.stdout = spec.get('stdout')
         self.stderr = spec.get('stderr')
         self.exit_status = None
-        self.location = spec.get('location', [])
+        self.location = spec.get('location') or []
         self.user = spec.get('user', "")
         self.executable = spec.get('executable')
         self.cwd = spec.get('cwd')
         self.size = str(spec.get('size'))
         self.mode = spec.get('mode', 'co')
-        self.args = " ".join(spec.get('args', []))
+        self.args = " ".join(spec.get('args') or [])
         self.kerneloptions = spec.get('kerneloptions')
-        self.env = spec.get('env', {})
+        self.env = spec.get('env') or {}
         self.true_mpi_args = spec.get('true_mpi_args')
         
         self.start()
@@ -189,13 +189,13 @@ class ProcessGroup (Data):
         os.dup2(stdin.fileno(), sys.__stdin__.fileno())
         try:
             stdout = open(self.stdout or tempfile.mktemp(), 'a')
-            os.chmod(stdout, 0600)
+            os.chmod(self.stdout, 0600)
             os.dup2(stdout.fileno(), sys.__stdout__.fileno())
         except (IOError, OSError), e:
             logger.error("process group %s: error opening stdout file %s: %s (stdout will be lost)" % (self.id, stdout, e))
         try:
             stderr = open(self.stderr or tempfile.mktemp(), 'a')
-            os.chmod(stderr, 0600)
+            os.chmod(self.stderr, 0600)
             os.dup2(stderr.fileno(), sys.__stderr__.fileno())
         except (IOError, OSError), e:
             logger.error("process group %s: error opening stderr file %s: %s (stderr will be lost)" % (self.id, stderr, e))
@@ -210,7 +210,6 @@ class ProcessGroup (Data):
             userid, groupid = pwd.getpwnam(self.user)[2:4]
         except KeyError:
             raise ProcessGroupCreationError("error getting uid/gid")
-        inputfile = self.inputfile
         kerneloptions = self.kerneloptions
         # strip out BGLMPI_MAPPING until mpirun bug is fixed 
         mapfile = ''
@@ -271,6 +270,7 @@ class ProcessGroup (Data):
                 os.setsid()
                 pid2 = os.fork()
                 if not pid2:
+                    os.close(newpipe_w)
                     self._start()
                 else:
                     newpipe_w = os.fdopen(newpipe_w, 'w')
