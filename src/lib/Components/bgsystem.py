@@ -24,7 +24,6 @@ import tempfile
 import time
 import thread
 import ConfigParser
-import traceback
 import thread
 from datetime import datetime
 try:
@@ -184,7 +183,7 @@ class ProcessGroup (Data):
         
         self.start()
     
-    def _start (self):
+    def _mpirun (self):
         stdin = open(self.stdin or "/dev/null", 'r')
         os.dup2(stdin.fileno(), sys.__stdin__.fileno())
         try:
@@ -269,18 +268,21 @@ class ProcessGroup (Data):
                 os.close(newpipe_r)
                 os.setsid()
                 pid2 = os.fork()
-                if not pid2:
-                    os.close(newpipe_w)
-                    self._start()
-                else:
-                    newpipe_w = os.fdopen(newpipe_w, 'w')
-                    newpipe_w.write(str(pid2))
-                    newpipe_w.close()
-                    os._exit(0)
             except Exception, e:
-                print >> sys.stderr, "when trying to fork for mpirun:", e
-                traceback.print_exc(file=sys.stderr)
+                self.logger.error("failure in intermediate daemonizing process: %s" % e)
                 os._exit(1)
+            if not pid2:
+                os.close(newpipe_w)
+                try:
+                    self._mpirun()
+                except Exception, e:
+                    self.logger.error("failure in daemon process: %s" % e)
+                    os._exit(1)
+            else:
+                newpipe_w = os.fdopen(newpipe_w, 'w')
+                newpipe_w.write(str(pid2))
+                newpipe_w.close()
+                os._exit(0)
 
         else:
             #parent process reads daemon child's pid through pipe
