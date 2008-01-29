@@ -143,7 +143,7 @@ class ProcessGroup (Data):
     required_fields = ['user', 'executable', 'args', 'location', 'size', 'cwd']
     fields = Data.fields + [
         "id", "user", "size", "cwd", "executable", "env", "args", "location",
-        "head_pid", "stdin", "stdout", "stderr", "exit_status",
+        "head_pid", "stdin", "stdout", "stderr", "exit_status", "state",
         "mode", "kerneloptions", "true_mpi_args",
     ]
     
@@ -180,8 +180,15 @@ class ProcessGroup (Data):
         self.kerneloptions = spec.get('kerneloptions')
         self.env = spec.get('env') or {}
         self.true_mpi_args = spec.get('true_mpi_args')
-        
         self.start()
+    
+    def _get_state (self):
+        if self.exit_status is None:
+            return "running"
+        else:
+            return "terminated"
+    
+    state = property(_get_state)
     
     def _mpirun (self):
         stdin = open(self.stdin or "/dev/null", 'r')
@@ -603,7 +610,7 @@ class BGSystem (Component):
     add_process_groups = exposed(query(all_fields=True)(add_process_groups))
     
     def get_process_groups (self, specs):
-        self.wait_process_groups(specs) # clear zombie mpiruns
+        self._get_exit_status()
         return self.process_groups.q_get(specs)
     get_process_groups = exposed(query(get_process_groups))
     
