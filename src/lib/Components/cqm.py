@@ -23,8 +23,8 @@ from Cobalt.Proxy import ComponentProxy, ComponentLookupError
 logger = logging.getLogger('cqm')
 cqm_id_gen = None
 
-class ProcessManagerError(Exception):
-    '''This error occurs when communications with the process manager fail'''
+class SystemError(Exception):
+    '''This error occurs when communications with the system fail'''
     pass
 
 class TimerException(Exception):
@@ -332,7 +332,7 @@ class Job (Data):
                 #self.output = pgroups[0]['output']
                 #self.error = pgroups[0]['error']
             except xmlrpclib.Fault:
-                logger.error("Error contacting process manager for finalize, requeueing")
+                logger.error("Error contacting the system for finalize, requeueing")
                 self.steps = ['FinalizeStage'] + self.steps
                 self.SetActive()
                 return
@@ -420,8 +420,8 @@ class Job (Data):
                 'cwd':cwd,
                 'kerneloptions':self.kerneloptions}])
         except ComponentLookupError:
-            logger.error("Failed to communicate with process manager")
-            raise ProcessManagerError()
+            logger.error("Failed to communicate with the system")
+            raise SystemError()
         self.pgid['user'] = pgroup[0]['id']
         self.SetPassive()
 
@@ -475,8 +475,8 @@ class Job (Data):
                 'stdin':self.inputfile,
                 'kerneloptions':self.kerneloptions}])
         except ComponentLookupError:
-            logger.error("Failed to communicate with process manager")
-            raise ProcessManagerError
+            logger.error("Failed to communicate with the system")
+            raise SystemError()
         
         self.pgid[cmd] = pgroup[0]['id']
 
@@ -503,8 +503,8 @@ class Job (Data):
         try:
             pgroup = ComponentProxy("system").signal_process_groups([{'id':pgid}], "SIGTERM")
         except ComponentLookupError:
-            logger.error("Failed to communicate with process manager")
-            raise ProcessManagerError
+            logger.error("Failed to communicate with the system")
+            raise SystemError()
 
     def over_time(self):
         '''Check if a job has run over its time'''
@@ -779,8 +779,8 @@ class BGJob(Job):
                     'kerneloptions':self.kerneloptions,
                 }])
             except ComponentLookupError:
-                logger.error("Failed to communicate with process manager")
-                raise ProcessManagerError
+                logger.error("Failed to communicate with the system")
+                raise SystemError()
             
             if not pgroup[0].has_key('id'):
                 logger.error("Process Group creation failed for Job %s" % self.jobid)
@@ -927,8 +927,8 @@ class ScriptMPIJob (Job):
                 'size':0,
                 'executable':"this will be ignored"}])
         except ComponentLookupError:
-            logger.error("Failed to communicate with process manager")
-            raise ProcessManagerError
+            logger.error("Failed to communicate with the system")
+            raise SystemError()
 
         if not pgroup[0].has_key('id'):
             logger.error("Process Group creation failed for Job %s" % self.jobid)
@@ -1362,12 +1362,12 @@ class QueueManager(Component):
     get_history = exposed(get_history)
 
     def pm_sync(self):
-        '''Resynchronize with the process manager'''
+        '''Resynchronize with the system'''
         
         try:
             pgroups = ComponentProxy("system").get_process_groups([{'id':'*', 'state':'running'}])
         except ComponentLookupError:
-            logger.error("Failed to communicate with process manager")
+            logger.error("Failed to communicate with the system")
             return
         live = [item['id'] for item in pgroups]
         for job in [j for queue in self.Queues.itervalues() for j in queue.jobs if j.mode!='script']:
