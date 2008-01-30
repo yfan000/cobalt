@@ -1355,7 +1355,7 @@ class QueueManager(Component):
         return self.cqp.Get(data)
     get_history = exposed(get_history)
 
-    def pm_sync(self):
+    def poll_process_groups (self):
         '''Resynchronize with the system'''
         
         try:
@@ -1370,7 +1370,7 @@ class QueueManager(Component):
                 if pgid not in live:
                     self.logger.info("Found dead pg for job %s" % (job.jobid))
                     job.CompletePG(pgid)
-    pm_sync = automatic(pm_sync)
+    poll_process_groups = automatic(poll_process_groups)
 
     def sm_sync(self):
         '''Resynchronize with the script manager'''
