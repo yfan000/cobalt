@@ -653,7 +653,7 @@ class BGJob(Job):
             if config.get(param, 'nothere') == 'nothere':
                 print "Missing option in cobalt config file: %s." % (param)
                 print "This is required only if dynamic kernel support is enabled"
-                raise SystemExit, 1
+                sys.exit(1)
 
     def __init__(self, spec):
         Job.__init__(self, spec)
@@ -858,7 +858,7 @@ class ScriptMPIJob (Job):
             if config.get(param, 'nothere') == 'nothere':
                 print "Missing option in cobalt config file: %s." % (param)
                 print "This is required only if dynamic kernel support is enabled"
-                raise SystemExit, 1
+                sys.exit(1)
 
     def __init__(self, spec):
         self.bgkernel = spec.get("bgkernel")
@@ -1225,12 +1225,6 @@ class QueueManager(Component):
     def __init__(self, *args, **kwargs):
         self.Queues = QueueDict()
         Component.__init__(self, *args, **kwargs)
-        
-        # make sure default queue exists
-#         if not [q for q in self.Queues if q.name == 'default']:
-#             self.Queues.Add([{'tag':'queue', 'name':'default'}])
-
-        print "i'm in __init__"
         self.prevdate = time.strftime("%m-%d-%y", time.localtime())
         self.cqp = Cobalt.Cqparse.CobaltLogParser()
         self.id_gen = IncrID()
