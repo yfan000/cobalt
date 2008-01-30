@@ -25,6 +25,7 @@ import time
 import thread
 import ConfigParser
 import thread
+import traceback
 from datetime import datetime
 try:
     set = set
@@ -162,7 +163,7 @@ class ProcessGroup (Data):
         print "Missing option(s) in cobalt config file: %s" % (" ".join(mfields))
         sys.exit(1)
     
-    logger = logger.getLogger("Cobalt.Components.bgsystem.ProcessGroup")
+    logger = logger
     
     def __init__(self, spec):
         Data.__init__(self, spec)
@@ -286,6 +287,7 @@ class ProcessGroup (Data):
                     self._mpirun()
                 except Exception, e:
                     self.logger.error("failure in daemon process: %s" % e)
+                    traceback.print_exc(file=sys.stderr)
                     os._exit(1)
             else:
                 newpipe_w = os.fdopen(newpipe_w, 'w')
@@ -368,7 +370,7 @@ class BGSystem (Component):
         thread.start_new_thread(self.update_partition_state, tuple())
     def save_me(self):
         Component.save(self, '/var/spool/cobalt/bgsystem')
-    save_me = automatic(save_me)
+    #save_me = automatic(save_me)
 
     def configure (self):
         
