@@ -161,7 +161,9 @@ class ProcessGroup (Data):
     if mfields:
         print "Missing option(s) in cobalt config file: %s" % (" ".join(mfields))
         sys.exit(1)
-
+    
+    logger = logger.getLogger("Cobalt.Components.bgsystem.ProcessGroup")
+    
     def __init__(self, spec):
         Data.__init__(self, spec)
         self.id = spec.get("id")
