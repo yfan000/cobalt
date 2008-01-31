@@ -47,7 +47,7 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-Cobalt.bridge.set_serial("BGP")
+Cobalt.bridge.set_serial("BGL")
 
 class ProcessGroupCreationError (Exception):
     """An error occured when creation a process group."""
@@ -235,12 +235,6 @@ class ProcessGroup (Data):
             logger.error("failed to change userid/groupid for process group %s" % (self.id))
             os._exit(1)
         
-        #os.system("%s > /dev/null 2>&1" % (self.config['db2_connect']))
-        os.environ["DB_PROPERTY"] = self.config['db2_properties']
-        os.environ["BRIDGE_CONFIG_FILE"] = self.config['bridge_config']
-        os.environ["MMCS_SERVER_IP"] = self.config['mmcs_server_ip']
-        os.environ["DB2INSTANCE"] = self.config['db2_instance']
-        os.environ["LD_LIBRARY_PATH"] = "/u/bgdb2cli/sqllib/lib"
         cmd = (self.config['mpirun'], os.path.basename(self.config['mpirun']),
                '-np', self.size, '-partition', partition,
                '-mode', self.mode, '-cwd', self.cwd, '-exe', self.executable)
@@ -259,7 +253,6 @@ class ProcessGroup (Data):
         # for the job, and can just replace the arguments built above.
         if self.true_mpi_args:
             cmd = (self.config.get('bgpm', 'mpirun'), os.path.basename(self.config.get('bgpm', 'mpirun'))) + tuple(self.true_mpi_args)
-        
         os.execl(*cmd)
     
     def start (self):
@@ -606,13 +599,13 @@ class BGSystem (Component):
             for each in self.process_groups.itervalues():
                 if each.head_pid == pid:
                     each.exit_status = status
+                    self.logger.info("pg %i exited with status %i" % (each.id, status))
     
     def wait_process_groups (self, specs):
         self._get_exit_status()
         process_groups = [pg for pg in self.process_groups.q_get(specs) if pg.exit_status is not None]
         for process_group in process_groups:
-            id = getattr(process_group, process_groups.key)
-            del self.process_groups[id]
+            del self.process_groups[process_group.id]
         return process_groups
     wait_process_groups = exposed(query(wait_process_groups))
     
