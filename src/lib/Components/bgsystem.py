@@ -266,43 +266,19 @@ class ProcessGroup (Data):
         
         """Start the process group.
         
-        Fork a daemonized process.
+        Fork for mpirun.
         """
 
-        # make pipe for daemon mpirun to talk to bgsystem
-        newpipe_r, newpipe_w = os.pipe()
-
-        pid1 = os.fork()
-        if not pid1:
+        child_pid = os.fork()
+        if not child_pid:
             try:
-                os.close(newpipe_r)
-                os.setsid()
-                pid2 = os.fork()
-            except Exception, e:
-                self.logger.error("failure in intermediate daemonizing process: %s" % e)
+                self._mpirun()
+            except:
+                traceback.print_exc(file=sys.stderr)
+                self.logger.error("unable to start mpirun")
                 os._exit(1)
-            if not pid2:
-                os.close(newpipe_w)
-                try:
-                    self._mpirun()
-                except Exception, e:
-                    self.logger.error("failure in daemon process: %s" % e)
-                    traceback.print_exc(file=sys.stderr)
-                    os._exit(1)
-            else:
-                newpipe_w = os.fdopen(newpipe_w, 'w')
-                newpipe_w.write(str(pid2))
-                newpipe_w.close()
-                os._exit(0)
-
         else:
-            #parent process reads daemon child's pid through pipe
-            os.close(newpipe_w)
-            newpipe_r = os.fdopen(newpipe_r, 'r')
-            self.head_pid = newpipe_r.read()
-            newpipe_r.close()
-            rc = os.waitpid(pid1, 0)
-            logger.info('intermediate process %d exited with status %d' % rc)
+            self.head_pid = child_pid
 
 
 class ProcessGroupDict (DataDict):
