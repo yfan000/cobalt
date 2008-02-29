@@ -209,11 +209,18 @@ class Component (object):
                 self.statefile = None
     
     def do_tasks (self):
+        
         """Perform automatic tasks for the component.
         
         Automatic tasks are member callables with an attribute
         automatic == True.
         """
+        
+        # don't do automatic methods more often than every 60 seconds
+        if time.time() < getattr(self, "_last_do_tasks", -1) + 60:
+            return
+        self._last_do_tasks = time.time()
+        
         for name, func in inspect.getmembers(self, callable):
             if getattr(func, "automatic", False):
                 starttime = time.time()
