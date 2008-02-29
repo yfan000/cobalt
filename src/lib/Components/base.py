@@ -13,6 +13,7 @@ import sys
 import getopt
 import logging
 import xmlrpclib
+import time
 
 import Cobalt
 import Cobalt.Proxy
@@ -215,7 +216,9 @@ class Component (object):
         """
         for name, func in inspect.getmembers(self, callable):
             if getattr(func, "automatic", False):
+                starttime = time.time()
                 func()
+                self.logger.info("%s took %0.2f seconds" % (name, time.time() - starttime))
     
     def _resolve_exposed_method (self, method_name):
         """Resolve an exposed method.
