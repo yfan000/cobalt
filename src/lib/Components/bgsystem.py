@@ -476,6 +476,7 @@ class BGSystem (Component):
                 return "busy"
 
         while True:
+            starttime = time.time()
             try:
                 system_def = Cobalt.bridge.PartitionList.info_by_filter()
             except BridgeException:
@@ -506,6 +507,7 @@ class BGSystem (Component):
                             break
                         
             self._partitions_lock.release()
+            self.logger.info("update_partition_state took %0.2f seconds" % (time.time() - starttime))
             
             time.sleep(10)
     
