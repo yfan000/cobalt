@@ -111,7 +111,7 @@ class Simulator (BGBaseSystem):
     implementation = "simulator"
     
     logger = logger
-
+   
     def __init__ (self, *args, **kwargs):
         BGBaseSystem.__init__(self, *args, **kwargs)
         self.process_groups.item_cls = ProcessGroup
@@ -163,7 +163,6 @@ class Simulator (BGBaseSystem):
     def save_me(self):
         Component.save(self)
     save_me = automatic(save_me)
-
 
     def configure (self, config_file):
         
@@ -258,6 +257,7 @@ class Simulator (BGBaseSystem):
         # update object state
         self._partitions.clear()
         self._partitions.update(partitions)
+        #print "partitions in simulator.py          :", self._partitions
 
     
     def reserve_partition (self, name, size=None):
@@ -267,13 +267,13 @@ class Simulator (BGBaseSystem):
         name -- name of the partition to reserve
         size -- size of the process group reserving the partition (optional)
         """
-        
+        print "in RESERVE PARTITION"
         try:
             partition = self.partitions[name]
         except KeyError:
             self.logger.error("reserve_partition(%r, %r) [does not exist]" % (name, size))
             return False
-        if partition.state != "idle":
+        if partition.state != "idle" and not partition.reserved:
             self.logger.error("reserve_partition(%r, %r) [%s]" % (name, size, partition.state))
             return False
         if not partition.functional:
@@ -284,6 +284,7 @@ class Simulator (BGBaseSystem):
 
         self._partitions_lock.acquire()
         partition.state = "busy"
+        self.state_change_serial += 1
         self._partitions_lock.release()
         # explicitly call this, since the above "busy" is instantaneously available
         self.update_partition_state()
@@ -309,6 +310,7 @@ class Simulator (BGBaseSystem):
                 
         self._partitions_lock.acquire()
         partition.state = "idle"
+        self.state_change_serial += 1
         self._partitions_lock.release()
         
         # explicitly unblock the blocked partitions
@@ -363,14 +365,6 @@ class Simulator (BGBaseSystem):
         argv = process_group._get_argv()
         stdout = open(process_group.stdout or "/dev/null", "a")
         stderr = open(process_group.stderr or "/dev/null", "a")
-        
-        try:
-            cobalt_log_file = open(process_group.cobalt_log_file or "/dev/null", "a")
-            print >> cobalt_log_file, "%s\n" % " ".join(argv[1:])
-            cobalt_log_file.close()
-        except:
-            logger.error("Job %s/%s:  unable to open cobaltlog file %s" % (process_group.id, process_group.user, process_group.cobalt_log_file))
-        
         try:
             partition = argv[argv.index("-partition") + 1]
         except ValueError:
@@ -467,7 +461,7 @@ class Simulator (BGBaseSystem):
         print >> stderr, "FE_MPI (Info) : Waiting for process_group to terminate"
         
         print >> stdout, "Running process_group: %s" % " ".join(argv)
-        
+
         start_time = time.time()
         run_time = random.randint(60, 180)
         my_exit_status = 0
@@ -504,6 +498,7 @@ class Simulator (BGBaseSystem):
     
     
     def update_partition_state(self):
+        print "called update_partition_state"
         # first, set all of the nodecards to not busy
         for nc in self.node_card_cache.values():
             nc.used_by = ''
@@ -535,8 +530,16 @@ class Simulator (BGBaseSystem):
                         p.state = "failed diags"
                     elif p.name in part.parents or p.name in part.children:
                         p.state = "blocked by failed diags"
-
-        
+                if p.reserved:
+                    p.state = 'blocked (starting job)'
+            else:
+                if p.reserved:
+                    p.reserved = False
+                    for part in p.children:
+                        self._partitions[part].reserved = False
+                    for part in p.parents:
+                        self._partitions[part].reserved = False
+            
         self._partitions_lock.release()
     update_partition_state = automatic(update_partition_state)
 

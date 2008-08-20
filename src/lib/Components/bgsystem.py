@@ -74,10 +74,6 @@ class ProcessGroup (bg_base_system.ProcessGroup):
             os._exit(1)
 
         try:
-            os.umask(self.umask)
-        except:
-            logger.error("Failed to set umask to %s" % self.umask)
-        try:
             partition = self.location[0]
         except IndexError:
             raise ProcessGroupCreationError("no location")
@@ -132,19 +128,6 @@ class ProcessGroup (bg_base_system.ProcessGroup):
         # for the job, and can just replace the arguments built above.
         if self.true_mpi_args:
             cmd = (self.config['mpirun'], os.path.basename(self.config['mpirun'])) + tuple(self.true_mpi_args)
-    
-        try:
-            cobalt_log_file = open(self.cobalt_log_file or "/dev/null", "a")
-            print >> cobalt_log_file, "%s\n" % " ".join(cmd[1:])
-            print >> cobalt_log_file, "called with environment:\n"
-            for key in os.environ:
-                print >> cobalt_log_file, "%s=%s" % (key, os.environ[key])
-            print >> cobalt_log_file, "\n"
-            cobalt_log_file.close()
-        except:
-            logger.error("Job %s/%s:  unable to open cobaltlog file %s" % \
-                         (self.id, self.user, self.cobalt_log_file))
-
         os.execl(*cmd)
     
     def start (self):
@@ -178,7 +161,8 @@ class BGSystem (BGBaseSystem):
     signal_process_groups -- send a signal to the head process of the specified process groups (exposed, query)
     update_partition_state -- update partition state from the bridge API (runs as a thread)
     """
-    
+
+
     name = "system"
     implementation = "bgsystem"
     
@@ -188,8 +172,7 @@ class BGSystem (BGBaseSystem):
         BGBaseSystem.__init__(self, *args, **kwargs)
         self.process_groups.item_cls = ProcessGroup
         self.diag_pids = dict()
-        self.configure()
-        
+        self.configure()    
         thread.start_new_thread(self.update_partition_state, tuple())
     
     def __getstate__(self):
@@ -231,6 +214,11 @@ class BGSystem (BGBaseSystem):
         
         self.update_relatives()
         thread.start_new_thread(self.update_partition_state, tuple())
+    '''
+    def get_state_change_serial(self):
+        return self.state_change_serial
+    get_state_change_serial = exposed(get_state_change_serial)
+    '''
 
     def save_me(self):
         Component.save(self)
@@ -342,12 +330,19 @@ class BGSystem (BGBaseSystem):
     
     def update_partition_state(self):
         """Use the quicker bridge method that doesn't return nodecard information to update the states of the partitions"""
+        print "called update_partition_state"
         
         def _get_state(bridge_partition):
             if bridge_partition.state == "RM_PARTITION_FREE":
                 return "idle"
             else:
                 return "busy"
+
+        try:
+            bg_object = Cobalt.bridge.BlueGene.by_serial()
+        except BridgeException:
+            self.logger.error("Error communicating with the bridge to get bluegene information.")
+            bg_object = None
 
         while True:
             try:
@@ -358,7 +353,8 @@ class BGSystem (BGBaseSystem):
                 continue # then try again
     
             try:
-                bg_object = Cobalt.bridge.BlueGene.by_serial()
+                if not bg_object:
+                    bg_object = Cobalt.bridge.BlueGene.by_serial()
                 for bp in bg_object.base_partitions:
                     for nc in Cobalt.bridge.NodeCardList.by_base_partition(bp):
                         self.node_card_cache[bp.id + "-" + nc.id].state = nc.state
@@ -366,11 +362,6 @@ class BGSystem (BGBaseSystem):
                 self.logger.error("Error communicating with the bridge to update nodecard state information.")
                 time.sleep(5) # wait a little bit...
                 continue # then try again
-
-            busted_switches = []
-            for s in bg_object.switches:
-                if s.state != "RM_SWITCH_UP":
-                    busted_switches.append(s.id)
 
             # first, set all of the nodecards to not busy
             for nc in self.node_card_cache.values():
@@ -380,7 +371,10 @@ class BGSystem (BGBaseSystem):
 
             for partition in system_def:
                 if self._partitions.has_key(partition.id):
-                    self._partitions[partition.id].state = _get_state(partition)
+                    new_state = _get_state(partition)
+                    if self._partitions[partition.id].state != new_state:
+                        self._partitions[partition.id].state = new_state
+                        self.state_change_serial  += 1
                     self._partitions[partition.id]._update_node_cards()
                 
             for p in self._partitions.values():
@@ -388,16 +382,18 @@ class BGSystem (BGBaseSystem):
                     for diag_part in self.pending_diags:
                         if p.name == diag_part.name or p.name in diag_part.parents or p.name in diag_part.children:
                             p.state = "blocked by pending diags"
+
+                    for diag_part in self.pending_diags:
+                        if p.name == diag_part.name or p.name in diag_part.parents or p.name in diag_part.children:
+                            p.state = "blocked by pending diags"
+
                     for nc in p.node_cards:
                         if nc.used_by:
                             p.state = "blocked (%s)" % nc.used_by
                             break
                         if nc.state != "RM_NODECARD_UP":
-                            p.state = "hardware down: nodecard %s" % nc.id
+                            p.state = "hardware down: %s" % nc.state
                             break 
-                    for s in p.switches:
-                        if s in busted_switches:
-                            p.state = "hardware down: switch %s" % s 
                     for dep_name in p._wiring_conflicts:
                         if self._partitions[dep_name].state == "busy":
                             p.state = "blocked-wiring (%s)" % dep_name
@@ -408,8 +404,17 @@ class BGSystem (BGBaseSystem):
                             p.state = "failed diags"
                         elif p.name in part.parents or p.name in part.children:
                             p.state = "blocked by failed diags"
+                
+                    if p.reserved:
+                        p.state = 'blocked (starting job)'
+                else:
+                    if p.reserved:
+                        p.reserved = False
+                        for part in p.children:
+                            self._partitions[part].reserved = False
+                        for part in p.parents:
+                            self._partitions[part].reserved = False
 
-                        
             self._partitions_lock.release()
             
             time.sleep(10)

@@ -9,6 +9,10 @@ ProcessGroupDict -- default container for process groups
 BGBaseSystem -- base system component
 """
 
+import logging
+import sys
+import time
+
 import Cobalt
 from Cobalt.Data import Data, DataDict, IncrID
 from Cobalt.Exceptions import DataCreationError, JobValidationError
@@ -23,6 +27,8 @@ __all__ = [
     "ProcessGroupDict", 
     "BGBaseSystem",
 ]
+
+SLOP_TIME = 180
 
 CP = ConfigParser.ConfigParser()
 CP.read(Cobalt.CONFIG_FILES)
@@ -59,7 +65,7 @@ class Partition (Data):
     """
     
     fields = Data.fields + [
-        "tag", "scheduled", "name", "functional",
+        "tag", "reserved", "scheduled", "name", "functional",
         "queue", "size", "parents", "children", "state",
     ]
     
@@ -67,6 +73,7 @@ class Partition (Data):
         """Initialize a new partition."""
         Data.__init__(self, spec)
         spec = spec.copy()
+        self.reserved = spec.pop("reserved", False)
         self.scheduled = spec.pop("scheduled", False)
         self.name = spec.pop("name", None)
         self.functional = spec.pop("functional", False)
@@ -110,6 +117,11 @@ class Partition (Data):
     def __repr__ (self):
         return "<%s name=%r>" % (self.__class__.__name__, self.name)
 
+    def _can_run (self):
+        """Check that job can run on partition with reservation constraints"""
+        return self.scheduled and self.functional
+
+
 
 class PartitionDict (DataDict):
     """Default container for partitions.
@@ -119,6 +131,20 @@ class PartitionDict (DataDict):
     
     item_cls = Partition
     key = "name"
+
+    def can_run(self, target_partition, job_size):
+        if target_partition.state != "idle":
+            return False
+        desired = sys.maxint
+        for part in self.itervalues():
+            if not part.functional:
+                if target_partition.name in part.children or target_partition.name in part.parents:
+                    return False
+            else:
+                if part.scheduled:
+                    if int(job_size) <= int(part.size) < desired:
+                        desired = int(part.size)
+        return target_partition._can_run() and int(target_partition.size) == desired
 
 class ProcessGroup (Data):
     required_fields = ['user', 'executable', 'args', 'location', 'size', 'cwd']
@@ -135,8 +161,6 @@ class ProcessGroup (Data):
         self.stdin = spec.get('stdin')
         self.stdout = spec.get('stdout')
         self.stderr = spec.get('stderr')
-        self.cobalt_log_file = spec.get('cobalt_log_file')
-        self.umask = spec.get('umask')
         self.exit_status = None
         self.location = spec.get('location') or []
         self.user = spec.get('user', "")
@@ -190,7 +214,11 @@ class BGBaseSystem (Component):
     set_partitions -- change random attributes of partitions (exposed, query)
     update_relatives -- should be called when partitions are added and removed from the managed list
     """
-    
+
+    logger = logging.getLogger("Cobalt.Components.scheduler")
+
+    state_change_serial = 1
+
     def __init__ (self, *args, **kwargs):
         Component.__init__(self, *args, **kwargs)
         self._partitions = PartitionDict()
@@ -208,6 +236,10 @@ class BGBaseSystem (Component):
         ])
     
     partitions = property(_get_partitions)
+
+    def get_state_change_serial(self):
+        return self.state_change_serial
+    get_state_change_serial = exposed(get_state_change_serial)
 
     def add_partitions (self, specs):
         self.logger.info("add_partitions(%r)" % (specs))
@@ -336,7 +368,7 @@ class BGBaseSystem (Component):
                     spec['proccount'] = str(4 * int(spec['nodecount']))
                 else:
                     self.logger.error("Unknown bgtype %s" % (sys_type))
-            elif spec.get('mode', 'co') == 'dual':
+            if spec.get('mode', 'co') == 'dual':
                 spec['proccount'] = 2 * int(spec['nodecount'])
             else:
                 spec['proccount'] = spec['nodecount']
@@ -453,3 +485,93 @@ class BGBaseSystem (Component):
         return ret
     unfail_partitions = exposed(unfail_partitions)
     
+    def get_equiv(self):
+        equiv = []
+        for part in self.partitions.itervalues():
+            if part.functional and part.scheduled:
+                found_a_match = False
+                
+                for e in equiv:
+                    if e['data'].intersection(part.node_card_names):
+                        e['queues'].update(part.queue.split(":"))
+                        e['data'].update(part.node_card_names)
+                        found_a_match = True
+                        break
+
+                if not found_a_match:
+                    equiv.append( { 'queues': set(part.queue.split(":")), 'data': set(part.node_card_names) } ) 
+
+        return equiv
+    get_equiv = exposed(get_equiv)
+
+
+    def partition_allocator(self, job_size, queue=None, exclusions=None, res=None):
+        print "in partition allocator"
+
+        available_partitions = []
+        for part in self.partitions.values():
+            if part.state == 'idle' and not part.reserved:
+                available_partitions.append(part)      
+            if part.reserved:
+                if time.time() - part.reserved > 5*60:
+                    part.reserved = False
+
+        best_score = sys.maxint
+        best_partition = None
+        for partition in available_partitions:
+               
+            if queue and queue not in partition.queue.split(':'):
+                continue
+
+            if not self.partitions.can_run(partition, job_size):
+                continue
+    
+            if exclusions:
+                overlap = False
+                for part_name in exclusions:
+                    if part_name==partition.name or part_name in partition.children or part_name in partition.parents:
+                        overlap = True
+                        break
+                if overlap:
+                    continue
+
+            if res:
+                part_in_res = False
+                for part_name in res:
+                    if not part_name in self.partitions:
+                        self.logger.error("reservation partition '%s' refers to non-existant partition" %  part_name)
+                        continue
+                    if not (partition.name==self.partitions[part_name].name or partition.name in self.partitions[part_name].children):
+                        continue
+                    # if we got here, then the partition is part of the reservation
+                    part_in_res = True
+                
+                if not part_in_res:
+                    continue
+                    
+    
+            # let's check the impact on partitions that would become blocked
+            score = 0
+            for p in partition.parents:
+                if self.partitions[p].state == "idle" and self.partitions[p].scheduled:
+                    score += 1
+            
+            # the lower the score, the fewer new partitions will be blocked by this selection
+            if score < best_score:
+                best_score = score
+                best_partition = partition        
+
+        if best_partition:
+            t = time.time()
+            best_partition.reserved = t
+            for part in best_partition.children:
+                self.partitions[part].reserved = t 
+            for part in best_partition.parents:
+                self.partitions[part].reserved = t 
+
+            return (best_partition.name, self.get_state_change_serial())
+        else:
+            return (None, self.get_state_change_serial())
+
+    partition_allocator = exposed(partition_allocator)
+
