@@ -236,34 +236,6 @@ class TestPartition(object):
         assert partition.children == None
         assert partition.state == "idle"
 
-    def test_can_run(self):
-        j = Job(10, "default")
-
-        partition = Partition({'scheduled':True, 'functional':True})
-        assert partition._can_run(j)
-        partition = Partition({'scheduled':True, 'functional':False})
-        assert not partition._can_run(j)
-        partition = Partition({'scheduled':False, 'functional':False})
-        assert not partition._can_run(j)
-
-    def test_part_can_run(self):
-        j = bgsched.Job({'nodes':20})
-
-        target_part = Partition({'name':"mine", 'functional':False, 'state':"idle", 'size':100})
-        part = Partition({'children':"mine", 'functional':False, 'state':"idle"})
-        partitiondict = PartitionDict({'part1':part, 'part2':part})
-        assert not partitiondict.can_run(target_part, j)
-        
-        target_part = Partition({'name':"mine", 'functional':True, 'scheduled':True,
-                                 'state':"idle", 'size':100 })
-        part = Partition({'children':"mine", 'functional':True, 'scheduled':True, 'size':100})
-        partitiondict = PartitionDict({'part1':part, 'part2':part})
-        assert partitiondict.can_run(target_part, j)
-
-        #target partition is not idle 
-        target_part = Partition({'state':"running"})
-        assert not partitiondict.can_run(target_part, j)
-
 class TestJob (object):
     def test_init(self):
         job = bgsched.Job({'nodes':20, 'state':"idle", 'jobid':1234, 'walltime':10 })
