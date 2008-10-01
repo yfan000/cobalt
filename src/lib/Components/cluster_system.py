@@ -16,6 +16,7 @@ import tempfile
 import time
 import thread
 import ConfigParser
+import tempfile
 try:
     set = set
 except NameError:
@@ -36,24 +37,11 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-class ProcessGroup (bg_base_system.ProcessGroup):
-    _configfields = ['mpirun']
-    _config = ConfigParser.ConfigParser()
-    if '-C' in sys.argv:
-        _config.read(sys.argv[sys.argv.index('-C') + 1])
-    else:
-        _config.read(Cobalt.CONFIG_FILES)
-    if not _config._sections.has_key('bgpm'):
-        print '''"bgpm" section missing from cobalt config file'''
-        sys.exit(1)
-    config = _config._sections['bgpm']
-    mfields = [field for field in _configfields if not config.has_key(field)]
-    if mfields:
-        print "Missing option(s) in cobalt config file: %s" % (" ".join(mfields))
-        sys.exit(1)
+class ProcessGroup (cluster_base_system.ProcessGroup):
     
     def __init__(self, spec):
-        bg_base_system.ProcessGroup.__init__(self, spec)
+        cluster_base_system.ProcessGroup.__init__(self, spec)
+        self.nodefile = ""
         self.start()
     
     def _mpirun (self):
@@ -94,8 +82,12 @@ class ProcessGroup (bg_base_system.ProcessGroup):
             else:
                 app_envs.append((key, value))
             
-        envs = " ".join(["%s=%s" % x for x in app_envs])
-        atexit._atexit = []
+        self.nodefile = tempfile.mktemp(dir="/tmp")
+        fd = open(self.nodefile, "w")
+	for host in self.location:
+	    fd.write(host + "\n")
+	fd.close()
+	os.environ["COBALT_NODEFILE"] = self.nodefile
 
         stdin = open(self.stdin or "/dev/null", 'r')
         os.dup2(stdin.fileno(), sys.__stdin__.fileno())
@@ -110,16 +102,8 @@ class ProcessGroup (bg_base_system.ProcessGroup):
         except (IOError, OSError), e:
             logger.error("process group %s: error opening stderr file %s: %s (stderr will be lost)" % (self.id, self.stderr, e))
 
-        cmd = (self.config['mpirun'], os.path.basename(self.config['mpirun']),
-              '-host', self.config['mmcs_server_ip'], '-np', str(self.size),
-               '-partition', partition, '-mode', self.mode, '-cwd', self.cwd,
-               '-exe', self.executable)
-        if self.args:
-            cmd = cmd + ('-args', self.args)
-        if envs:
-            cmd = cmd + ('-env',  envs)
-        if kerneloptions:
-            cmd = cmd + ('-kernel_options', kerneloptions)
+        rank0 = self.location[0].split(":")[0]
+        cmd = ("/usr/bin/ssh", "/usr/bin/ssh", rank0, self.executable)
         
         # If this mpirun command originated from a user script, its arguments
         # have been passed along in a special attribute.  These arguments have
@@ -180,26 +164,13 @@ class ClusterSystem (ClusterBaseSystem):
     logger = logger
 
     
-    _configfields = ['diag_script_location', 'diag_log_file']
-    _config = ConfigParser.ConfigParser()
-    if '-C' in sys.argv:
-        _config.read(sys.argv[sys.argv.index('-C') + 1])
-    else:
-        _config.read(Cobalt.CONFIG_FILES)
-    if not _config._sections.has_key('bgsystem'):
-        print '''"bgsystem" section missing from cobalt config file'''
-        sys.exit(1)
-    config = _config._sections['bgsystem']
-    mfields = [field for field in _configfields if not config.has_key(field)]
-    if mfields:
-        print "Missing option(s) in cobalt config file [bgsystem] section: %s" % (" ".join(mfields))
-        sys.exit(1)
-
-    
     def __init__ (self, *args, **kwargs):
         ClusterBaseSystem.__init__(self, *args, **kwargs)
         self.process_groups.item_cls = ProcessGroup
-        self.configure()
+        self.config_file = kwargs.get("config_file", None)
+        if self.config_file is not None:
+            self.configure(self.config_file)
+
         
     
     def add_process_groups (self, specs):
@@ -238,6 +209,8 @@ class ClusterSystem (ClusterBaseSystem):
         self._get_exit_status()
         process_groups = [pg for pg in self.process_groups.q_get(specs) if pg.exit_status is not None]
         for process_group in process_groups:
+            for host in self.process_groups[process_group.id].location:
+                self.running_nodes.remove(host)
             del self.process_groups[process_group.id]
         return process_groups
     wait_process_groups = exposed(query(wait_process_groups))
