@@ -502,7 +502,7 @@ class BGBaseSystem (Component):
                     best_partition = partition        
 
         if best_partition:
-            return {jobid: best_partition.name}
+            return {jobid: [best_partition.name]}
 
     
     # the argument "required" is used to pass in the set of locations allowed by a reservation;
@@ -533,8 +533,8 @@ class BGBaseSystem (Component):
 
         # reserve the stuff in the best_partition_dict, as those partitions are allegedly going to 
         # be running jobs very soon
-        for partition_name in best_partition_dict.itervalues():
-            part = self.partitions[partition_name] 
+        for partition_list in best_partition_dict.itervalues():
+            part = self.partitions[partition_list[0]] 
             part.reserved_until = time.time() + 5*60
             part.state = "starting job"
             for p in part._parents:
