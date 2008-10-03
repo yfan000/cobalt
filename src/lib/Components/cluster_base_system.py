@@ -102,6 +102,13 @@ class ClusterBaseSystem (Component):
         self.failed_diags = list()
         self.all_nodes = sets.Set()
         self.running_nodes = sets.Set()
+        self.down_nodes = sets.Set()
+        self.queue_assignments = {}
+        self.config_file = kwargs.get("config_file", None)
+        if self.config_file is not None:
+            self.configure(self.config_file)
+        self.queue_assignments["default"] = sets.Set(self.all_nodes)
+
 
 
     def validate_job(self, spec):
@@ -276,8 +283,9 @@ class ClusterBaseSystem (Component):
         if required:
             available_nodes = required
         else:
-            available_nodes = self.all_nodes.difference(self.running_nodes)
+            available_nodes = self.queue_assignments[queue].difference(self.running_nodes)
             available_nodes = available_nodes.difference(forbidden)
+            available_nodes = available_nodes.difference(self.down_nodes)
             
         if nodes <= len(available_nodes):
             return {jobid: [available_nodes.pop() for i in range(nodes)]}
@@ -382,6 +390,66 @@ class ClusterBaseSystem (Component):
             self.logger.error("failed to reserve partition '%s' until '%s'" % (partition_name, time))
     reserve_partition_until = exposed(reserve_partition_until)
 
+
+    def nodes_up(self, node_list):
+        changed = []
+        for n in node_list:
+            if n in self.down_nodes:
+                self.down_nodes.remove(n)
+                changed.append(n)
+        return changed
+    nodes_up = exposed(nodes_up)
+        
+
+    def nodes_down(self, node_list):
+        changed = []
+        for n in node_list:
+            if n in self.all_nodes:
+                self.down_nodes.add(n)
+                changed.append(n)
+        return changed
+    nodes_down = exposed(nodes_down)
+
+    def get_node_status(self):
+        status = {}
+        for n in self.all_nodes:
+            if n in self.running_nodes:
+                status[n] = "allocated"
+            elif n in self.down_nodes:
+                status[n] = "down"
+            else:
+                status[n] = "idle"
+        return status
+    get_node_status = exposed(get_node_status)
+
+    def get_queue_assignments(self):
+        ret = {}
+        for q in self.queue_assignments:
+            ret[q] = list(self.queue_assignments[q])
+        return ret
+    get_queue_assignments = exposed(get_queue_assignments)
+    
+    def set_queue_assignments(self, queue_names, node_list):
+        checked_nodes = sets.Set()
+        for n in node_list:
+            if n in self.all_nodes:
+                checked_nodes.add(n)
+        
+        queue_list = queue_names.split(":")
+        for q in queue_list:
+            if q not in self.queue_assignments:
+                self.queue_assignments[q] = sets.Set()
+                
+        print queue_list
+        for q in self.queue_assignments.keys():
+            if q not in queue_list:
+                self.queue_assignments[q].difference_update(checked_nodes)
+                if len(self.queue_assignments[q])==0:
+                    del self.queue_assignments[q]
+            else:
+                self.queue_assignments[q].update(checked_nodes)
+        return list(checked_nodes)
+    set_queue_assignments = exposed(set_queue_assignments)
 
     def configure(self, filename):
         f = open(filename)

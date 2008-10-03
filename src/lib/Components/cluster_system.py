@@ -147,9 +147,6 @@ class ClusterSystem (ClusterBaseSystem):
     def __init__ (self, *args, **kwargs):
         ClusterBaseSystem.__init__(self, *args, **kwargs)
         self.process_groups.item_cls = ProcessGroup
-        self.config_file = kwargs.get("config_file", None)
-        if self.config_file is not None:
-            self.configure(self.config_file)
 
         
     
