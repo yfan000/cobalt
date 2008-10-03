@@ -47,7 +47,10 @@ class ProcessGroup (cluster_base_system.ProcessGroup):
     def _mpirun (self):
         #check for valid user/group
         try:
-            userid, groupid = pwd.getpwnam(self.user)[2:4]
+            tmp_data = pwd.getpwnam(self.user)
+	    userid = tmp_data.pw_uid
+	    groupid = tmp_data.pw_gid
+	    homedir = tmp_data.pw_dir
         except KeyError:
             raise ProcessGroupCreationError("error getting uid/gid")
         
@@ -62,32 +65,12 @@ class ProcessGroup (cluster_base_system.ProcessGroup):
             os.umask(self.umask)
         except:
             logger.error("Failed to set umask to %s" % self.umask)
-        try:
-            partition = self.location[0]
-        except IndexError:
-            raise ProcessGroupCreationError("no location")
 
-        kerneloptions = self.kerneloptions
-
-        # export subset of MPIRUN_* variables to mpirun's environment
-        # we explicitly state the ones we want since some are "dangerous"
-        exportenv = [ 'MPIRUN_CONNECTION', 'MPIRUN_KERNEL_OPTIONS',
-                      'MPIRUN_MAPFILE', 'MPIRUN_START_GDBSERVER',
-                      'MPIRUN_LABEL', 'MPIRUN_NW', 'MPIRUN_VERBOSE',
-                      'MPIRUN_ENABLE_TTY_REPORTING', 'MPIRUN_STRACE' ]
-        app_envs = []
-        for key, value in self.env.iteritems():
-            if key in exportenv:
-                os.environ[key] = value
-            else:
-                app_envs.append((key, value))
-            
-        self.nodefile = tempfile.mktemp(dir="/tmp")
+        self.nodefile = tempfile.mktemp(prefix=".cobalt", dir=homedir)
         fd = open(self.nodefile, "w")
 	for host in self.location:
 	    fd.write(host + "\n")
 	fd.close()
-	os.environ["COBALT_NODEFILE"] = self.nodefile
 
         stdin = open(self.stdin or "/dev/null", 'r')
         os.dup2(stdin.fileno(), sys.__stdin__.fileno())
@@ -103,7 +86,8 @@ class ProcessGroup (cluster_base_system.ProcessGroup):
             logger.error("process group %s: error opening stderr file %s: %s (stderr will be lost)" % (self.id, self.stderr, e))
 
         rank0 = self.location[0].split(":")[0]
-        cmd = ("/usr/bin/ssh", "/usr/bin/ssh", rank0, self.executable)
+        env_setup = "env COBALT_NODEFILE=%s COBALT_JOBID=%s " % (self.nodefile, self.env["COBALT_JOBID"])
+        cmd = ("/usr/bin/ssh", "/usr/bin/ssh", rank0, env_setup + self.executable)
         
         # If this mpirun command originated from a user script, its arguments
         # have been passed along in a special attribute.  These arguments have
@@ -115,10 +99,6 @@ class ProcessGroup (cluster_base_system.ProcessGroup):
         try:
             cobalt_log_file = open(self.cobalt_log_file or "/dev/null", "a")
             print >> cobalt_log_file, "%s\n" % " ".join(cmd[1:])
-            print >> cobalt_log_file, "called with environment:\n"
-            for key in os.environ:
-                print >> cobalt_log_file, "%s=%s" % (key, os.environ[key])
-            print >> cobalt_log_file, "\n"
             cobalt_log_file.close()
         except:
             logger.error("Job %s/%s:  unable to open cobaltlog file %s" % \
