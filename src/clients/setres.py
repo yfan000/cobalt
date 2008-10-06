@@ -53,16 +53,15 @@ if __name__ == '__main__':
 
     if '-f' not in sys.argv:
         # we best check that the partitions are valid
-        pspec = [{'name':p} for p in partitions]
         try:
             system = ComponentProxy("system", defer=False)
         except ComponentLookupError:
             print "Failed to contact system component for partition check"
             raise SystemExit, 1
         for p in partitions:
-            test_parts = system.get_partitions(pspec)
-            if len(test_parts) != len(pspec):
-                missing = [p for p in partitions if {'name':p} not in test_parts]
+            test_parts = system.verify_locations(partitions)
+            if len(test_parts) != len(partitions):
+                missing = [p for p in partitions if p not in test_parts]
                 print "Missing partitions: %s" % (" ".join(missing))
                 raise SystemExit, 1
     

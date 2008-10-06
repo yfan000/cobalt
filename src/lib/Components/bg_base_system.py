@@ -238,6 +238,12 @@ class BGBaseSystem (Component):
         
         return partitions
     get_partitions = exposed(query(get_partitions))
+    
+    def verify_locations(self, location_list):
+        """Providing a system agnostic interface for making sure a 'location string' is valid"""
+        parts = self.get_partitions([{'name':l} for l in location_list])
+        return [ p.name for p in parts ]
+    verify_locations = exposed(verify_locations)
 
     def del_partitions (self, specs):
         """Remove partitions from the list of managed partitions"""

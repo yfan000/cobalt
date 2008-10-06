@@ -281,11 +281,13 @@ class ClusterBaseSystem (Component):
         best_partition = None
 
         if required:
-            available_nodes = required
+            available_nodes = sets.Set(required)
         else:
-            available_nodes = self.queue_assignments[queue].difference(self.running_nodes)
-            available_nodes = available_nodes.difference(forbidden)
-            available_nodes = available_nodes.difference(self.down_nodes)
+            available_nodes = self.queue_assignments[queue].difference(forbidden)
+
+        available_nodes = available_nodes.difference(self.running_nodes)
+        available_nodes = available_nodes.difference(self.down_nodes)
+
             
         if nodes <= len(available_nodes):
             return {jobid: [available_nodes.pop() for i in range(nodes)]}
@@ -334,19 +336,18 @@ class ClusterBaseSystem (Component):
 
 
     def find_queue_equivalence_classes(self, reservation_dict):
-        return [{'queues': ["default"], 'reservations': []}]
         equiv = []
-        for part in self.partitions.itervalues():
-            if part.functional and part.scheduled:
-                found_a_match = False
-                for e in equiv:
-                    if e['data'].intersection(part.node_card_names):
-                        e['queues'].update(part.queue.split(":"))
-                        e['data'].update(part.node_card_names)
-                        found_a_match = True
-                        break
-                if not found_a_match:
-                    equiv.append( { 'queues': set(part.queue.split(":")), 'data': set(part.node_card_names), 'reservations': set() } ) 
+        for q in self.queue_assignments:
+            found_a_match = False
+            for e in equiv:
+                if e['data'].intersection(self.queue_assignments[q]):
+                    e['queues'].add(q)
+                    e['data'].update(self.queue_assignments[q])
+                    found_a_match = True
+                    break
+            if not found_a_match:
+                equiv.append( { 'queues': set([q]), 'data': set(self.queue_assignments[q]), 'reservations': set() } )
+        
         
         real_equiv = []
         for eq_class in equiv:
@@ -365,14 +366,9 @@ class ClusterBaseSystem (Component):
         for eq_class in equiv:
             for res_name in reservation_dict:
                 skip = True
-                for p_name in reservation_dict[res_name].split(":"):
-                    p = self.partitions[p_name]
-                    if eq_class['data'].intersection(p.node_card_names):
+                for host_name in reservation_dict[res_name].split(":"):
+                    if host_name in eq_class['data']:
                         eq_class['reservations'].add(res_name)
-                    for dep_name in p._wiring_conflicts:
-                        if eq_class['data'].intersection(self.partitions[dep_name].node_card_names):
-                            eq_class['reservations'].add(res_name)
-                            break
 
             for key in eq_class:
                 eq_class[key] = list(eq_class[key])
@@ -440,7 +436,6 @@ class ClusterBaseSystem (Component):
             if q not in self.queue_assignments:
                 self.queue_assignments[q] = sets.Set()
                 
-        print queue_list
         for q in self.queue_assignments.keys():
             if q not in queue_list:
                 self.queue_assignments[q].difference_update(checked_nodes)
@@ -450,6 +445,15 @@ class ClusterBaseSystem (Component):
                 self.queue_assignments[q].update(checked_nodes)
         return list(checked_nodes)
     set_queue_assignments = exposed(set_queue_assignments)
+
+    def verify_locations(self, location_list):
+        """Providing a system agnostic interface for making sure a 'location string' is valid"""
+        ret = []
+        for l in location_list:
+            if l in self.all_nodes:
+                ret.append(l)
+        return ret
+    verify_locations = exposed(verify_locations)
 
     def configure(self, filename):
         f = open(filename)
