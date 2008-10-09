@@ -754,6 +754,7 @@ class Job (Data):
                     'location':self.location,
                     'id':"*", 'umask':self.umask,
                     'kerneloptions':self.kerneloptions,
+                    'jobid':self.jobid,
                 }])
             except (ComponentLookupError, xmlrpclib.Fault):
                 logger.error("Job %s: Failed to start up user job; requeueing" \

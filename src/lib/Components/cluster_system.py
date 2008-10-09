@@ -7,6 +7,7 @@ BGSystem -- Blue Gene system component
 
 import atexit
 import pwd
+import grp
 import sets
 import logging
 import sys
@@ -38,6 +39,21 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 class ProcessGroup (cluster_base_system.ProcessGroup):
+    _configfields = ['prologue', 'epilogue']
+    _config = ConfigParser.ConfigParser()
+    if '-C' in sys.argv:
+        _config.read(sys.argv[sys.argv.index('-C') + 1])
+    else:
+        _config.read(Cobalt.CONFIG_FILES)
+    if not _config._sections.has_key('cluster_system'):
+        print '''"cluster_system" section missing from cobalt config file'''
+        sys.exit(1)
+    config = _config._sections['cluster_system']
+    mfields = [field for field in _configfields if not config.has_key(field)]
+    if mfields:
+        print "Missing option(s) in cobalt config file [cluster_system] section: %s" % (" ".join(mfields))
+        sys.exit(1)
+
     
     def __init__(self, spec):
         cluster_base_system.ProcessGroup.__init__(self, spec)
@@ -45,15 +61,35 @@ class ProcessGroup (cluster_base_system.ProcessGroup):
         self.start()
     
     def _mpirun (self):
+        # create the nodefile
+        self.nodefile = "/var/tmp/cobalt.%s" % self.jobid
+        fd = open(self.nodefile, "w")
+	for host in self.location:
+	    fd.write(host + "\n")
+	fd.close()
+
         #check for valid user/group
         try:
             tmp_data = pwd.getpwnam(self.user)
 	    userid = tmp_data.pw_uid
 	    groupid = tmp_data.pw_gid
-	    homedir = tmp_data.pw_dir
         except KeyError:
             raise ProcessGroupCreationError("error getting uid/gid")
+
+	group_name = grp.getgrgid(groupid)[0]
         
+        # run the prologue, while still root
+	for host in self.location:
+	    h = host.split(":")[0]
+            try:
+	        os.system("scp %s %s:/var/tmp" % (self.nodefile, h))
+	    except:
+	        logger.error("Job %s/%s failed to copy nodefile %s to host %s" % (self.jobid, self.user, self.nodefile, h))
+	    try:
+                os.system("ssh %s %s %s %s %s" % (h, self.config.get("prologue"), self.jobid, self.user, group_name))
+            except:
+	        logger.error("Job %s/%s failed to run prologue on host %s" % (self.jobid, self.user, h))
+
         try:
             os.setgid(groupid)
             os.setuid(userid)
@@ -65,12 +101,6 @@ class ProcessGroup (cluster_base_system.ProcessGroup):
             os.umask(self.umask)
         except:
             logger.error("Failed to set umask to %s" % self.umask)
-
-        self.nodefile = tempfile.mktemp(prefix=".cobalt", dir=homedir)
-        fd = open(self.nodefile, "w")
-	for host in self.location:
-	    fd.write(host + "\n")
-	fd.close()
 
         stdin = open(self.stdin or "/dev/null", 'r')
         os.dup2(stdin.fileno(), sys.__stdin__.fileno())
@@ -186,9 +216,7 @@ class ClusterSystem (ClusterBaseSystem):
         self._get_exit_status()
         process_groups = [pg for pg in self.process_groups.q_get(specs) if pg.exit_status is not None]
         for process_group in process_groups:
-            for host in self.process_groups[process_group.id].location:
-                self.running_nodes.remove(host)
-            del self.process_groups[process_group.id]
+            thread.start_new_thread(self.clean_nodes, (process_group,))
         return process_groups
     wait_process_groups = exposed(query(wait_process_groups))
     
@@ -201,4 +229,25 @@ class ClusterSystem (ClusterBaseSystem):
                 self.logger.error("signal failure for process group %s: %s" % (pg.id, e))
         return my_process_groups
     signal_process_groups = exposed(query(signal_process_groups))
+
+    def clean_nodes(self, pg):
+        try:
+            tmp_data = pwd.getpwnam(pg.user)
+	    groupid = tmp_data.pw_gid
+	    group_name = grp.getgrgid(groupid)[0]
+        except KeyError:
+            group_name = ""
+	    self.logger.error("Job %s/%s unable to determine group name for epilogue" % (pg.jobid, pg.user))
+ 
+        for host in pg.location:
+	    h = host.split(":")[0]
+	    try:
+                os.system("ssh %s %s %s %s %s" % (h, pg.config.get("epilogue"), pg.jobid, pg.user, group_name))
+	    except:
+	        self.logger.error("Job %s/%s failed to run epilogue on host %s" % (pg.jobid, pg.user, h))
+        for host in pg.location:
+            self.running_nodes.remove(host)
+
+        del self.process_groups[pg.id]
+	
 

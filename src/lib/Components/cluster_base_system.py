@@ -29,7 +29,7 @@ class ProcessGroup (Data):
     fields = Data.fields + [
         "id", "user", "size", "cwd", "executable", "env", "args", "location",
         "head_pid", "stdin", "stdout", "stderr", "exit_status", "state",
-        "mode", "kerneloptions", "true_mpi_args",
+        "mode", "kerneloptions", "true_mpi_args", "jobid",
     ]
 
     def __init__(self, spec):
@@ -52,6 +52,7 @@ class ProcessGroup (Data):
         self.kerneloptions = spec.get('kerneloptions')
         self.env = spec.get('env') or {}
         self.true_mpi_args = spec.get('true_mpi_args')
+        self.jobid = spec.get('jobid')
 
     def _get_state (self):
         if self.exit_status is None:
