@@ -11,7 +11,7 @@ if __name__ == '__main__':
     p = optparse.OptionParser(usage="%prog [-l] [--down part1 part2] [--up part1 part2]")
     
     p.add_option("--down", action="store_true", dest="down", help="mark nodes as down")
-    p.add_option("--up", action="store_true", dest="up", help="mark nodes as up")
+    p.add_option("--up", action="store_true", dest="up", help="mark nodes as up (even if allocated)")
     p.add_option("--queue", action="store", dest="queue", help="set queue associations")
     p.add_option("-l", action="store_true", dest="list", help="list node states")
 

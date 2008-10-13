@@ -394,6 +394,9 @@ class ClusterBaseSystem (Component):
             if n in self.down_nodes:
                 self.down_nodes.remove(n)
                 changed.append(n)
+            if n in self.running_nodes:
+                self.running_nodes.remove(n)
+                changed.append(n)
         return changed
     nodes_up = exposed(nodes_up)
         
