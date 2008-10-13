@@ -64,31 +64,31 @@ class ProcessGroup (cluster_base_system.ProcessGroup):
         # create the nodefile
         self.nodefile = "/var/tmp/cobalt.%s" % self.jobid
         fd = open(self.nodefile, "w")
-	for host in self.location:
-	    fd.write(host + "\n")
-	fd.close()
+        for host in self.location:
+            fd.write(host + "\n")
+        fd.close()
 
         #check for valid user/group
         try:
             tmp_data = pwd.getpwnam(self.user)
-	    userid = tmp_data.pw_uid
-	    groupid = tmp_data.pw_gid
+            userid = tmp_data.pw_uid
+            groupid = tmp_data.pw_gid
         except KeyError:
             raise ProcessGroupCreationError("error getting uid/gid")
 
-	group_name = grp.getgrgid(groupid)[0]
+        group_name = grp.getgrgid(groupid)[0]
         
         # run the prologue, while still root
-	for host in self.location:
-	    h = host.split(":")[0]
+        for host in self.location:
+            h = host.split(":")[0]
             try:
-	        os.system("scp %s %s:/var/tmp" % (self.nodefile, h))
-	    except:
-	        logger.error("Job %s/%s failed to copy nodefile %s to host %s" % (self.jobid, self.user, self.nodefile, h))
-	    try:
+                os.system("scp %s %s:/var/tmp" % (self.nodefile, h))
+            except:
+                logger.error("Job %s/%s failed to copy nodefile %s to host %s" % (self.jobid, self.user, self.nodefile, h))
+            try:
                 os.system("ssh %s %s %s %s %s" % (h, self.config.get("prologue"), self.jobid, self.user, group_name))
             except:
-	        logger.error("Job %s/%s failed to run prologue on host %s" % (self.jobid, self.user, h))
+                logger.error("Job %s/%s failed to run prologue on host %s" % (self.jobid, self.user, h))
 
         try:
             os.setgid(groupid)
@@ -233,21 +233,21 @@ class ClusterSystem (ClusterBaseSystem):
     def clean_nodes(self, pg):
         try:
             tmp_data = pwd.getpwnam(pg.user)
-	    groupid = tmp_data.pw_gid
-	    group_name = grp.getgrgid(groupid)[0]
+            groupid = tmp_data.pw_gid
+            group_name = grp.getgrgid(groupid)[0]
         except KeyError:
             group_name = ""
-	    self.logger.error("Job %s/%s unable to determine group name for epilogue" % (pg.jobid, pg.user))
+            self.logger.error("Job %s/%s unable to determine group name for epilogue" % (pg.jobid, pg.user))
  
         for host in pg.location:
-	    h = host.split(":")[0]
-	    try:
+            h = host.split(":")[0]
+            try:
                 os.system("ssh %s %s %s %s %s" % (h, pg.config.get("epilogue"), pg.jobid, pg.user, group_name))
-	    except:
-	        self.logger.error("Job %s/%s failed to run epilogue on host %s" % (pg.jobid, pg.user, h))
+            except:
+                self.logger.error("Job %s/%s failed to run epilogue on host %s" % (pg.jobid, pg.user, h))
         for host in pg.location:
-            self.running_nodes.remove(host)
+            self.running_nodes.discard(host)
 
         del self.process_groups[pg.id]
-	
+        
 

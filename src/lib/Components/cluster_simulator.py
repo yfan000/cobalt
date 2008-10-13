@@ -145,7 +145,7 @@ class Simulator (ClusterBaseSystem):
         for process_group in process_groups:
             print "finished on hosts:", self.process_groups[process_group.id].location
             for host in self.process_groups[process_group.id].location:
-                self.running_nodes.remove(host)
+                self.running_nodes.discard(host)
             del self.process_groups[process_group.id]
         return process_groups
     wait_process_groups = exposed(query(wait_process_groups))
