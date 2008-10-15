@@ -116,8 +116,8 @@ class ProcessGroup (cluster_base_system.ProcessGroup):
             logger.error("process group %s: error opening stderr file %s: %s (stderr will be lost)" % (self.id, self.stderr, e))
 
         rank0 = self.location[0].split(":")[0]
-        env_setup = "env COBALT_NODEFILE=%s COBALT_JOBID=%s " % (self.nodefile, self.env["COBALT_JOBID"])
-        cmd = ("/usr/bin/ssh", "/usr/bin/ssh", rank0, env_setup + self.executable)
+        cmd_string = "/home/buettner/cluster/src/clients/cobalt-launcher.py --nf %s --jobid %s --cwd %s --exe %s" % (self.nodefile, self.jobid, self.cwd, self.executable)
+        cmd = ("/usr/bin/ssh", "/usr/bin/ssh", rank0, cmd_string)
         
         # If this mpirun command originated from a user script, its arguments
         # have been passed along in a special attribute.  These arguments have
