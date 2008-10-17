@@ -86,7 +86,7 @@ if __name__ == '__main__':
         try:
             minutes = Cobalt.Util.get_time(duration)
         except Cobalt.Exceptions.TimeFormatError, e:
-            print "invalid duration specification: %s" % e.message
+            print "invalid duration specification: %s" % e.args[0]
             sys.exit(1)
         dsec = 60 * minutes
     if start:
@@ -124,7 +124,7 @@ if __name__ == '__main__':
         try:
             minutes = Cobalt.Util.get_time(cycle_time)
         except Cobalt.Exceptions.TimeFormatError, e:
-            print "invalid cycle time specification: %s" % e.message
+            print "invalid cycle time specification: %s" % e.args[0]
             sys.exit(1)
         cycle_time = 60 * minutes
 
