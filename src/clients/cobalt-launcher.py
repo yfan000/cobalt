@@ -19,10 +19,8 @@ if __name__ == '__main__':
         
     opt, args = p.parse_args()
 
-    env = {}
-    env['COBALT_JOBID'] = opt.jobid
-    env['COBALT_NODEFILE'] = opt.nodefile
-    env['PATH'] = os.environ['PATH']
+    os.environ['COBALT_JOBID'] = opt.jobid
+    os.environ['COBALT_NODEFILE'] = opt.nodefile
 
     os.chdir(opt.cwd)
-    os.execvpe(opt.executable, (opt.executable, ), env)
+    os.execvpe(opt.executable, (opt.executable, ), os.environ)
