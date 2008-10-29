@@ -23,4 +23,8 @@ if __name__ == '__main__':
     os.environ['COBALT_NODEFILE'] = opt.nodefile
 
     os.chdir(opt.cwd)
-    os.execvpe(opt.executable, (opt.executable, ), os.environ)
+    try:
+        os.execvpe(opt.executable, (opt.executable, ), os.environ)
+    except Exception, e:
+        print >> sys.stderr, "error executing %s" % opt.executable
+        print >> sys.stderr, e
