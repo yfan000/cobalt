@@ -764,17 +764,40 @@ class BGSched (Component):
         equiv = []
         for part in self.partitions.itervalues():
             if part.functional and part.scheduled:
+                part_active_queues = []
+                for q in part.queue.split(":"):
+                    if self.queues[q].state == "running":
+                        part_active_queues.append(q)
+
+                # go on to the next partition if there are no running
+                # queues using this partition
+                if not part_active_queues:
+                    continue
+
                 found_a_match = False
                 for e in equiv:
                     if e['data'].intersection(part.node_card_names):
-                        e['queues'].update(part.queue.split(":"))
+                        e['queues'].update(part_active_queues)
                         e['data'].update(part.node_card_names)
                         found_a_match = True
                         break
                 if not found_a_match:
-                    equiv.append( { 'queues': set(part.queue.split(":")), 'data': set(part.node_card_names) } ) 
+                    equiv.append( { 'queues': set(part_active_queues), 'data': set(part.node_card_names) } ) 
             
-        
+        real_equiv = []
+        for eq_class in equiv:
+            found_a_match = False
+            for e in real_equiv:
+                if e['queues'].intersection(eq_class['queues']):
+                    e['queues'].update(eq_class['queues'])
+                    e['data'].update(eq_class['data'])
+                    found_a_match = True
+                    break
+            if not found_a_match:
+                real_equiv.append(eq_class)
+
+        equiv = real_equiv
+
         for eq_class in equiv:
             temp_jobs = self.jobs.q_get([{'state':"queued", 'queue':queue.name} for queue in active_queues if queue.name in eq_class['queues']])
             active_jobs = []
