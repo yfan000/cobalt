@@ -11,11 +11,14 @@ BGBaseSystem -- base system component
 
 import sys
 import time
+import xmlrpclib
 import Cobalt
 from Cobalt.Data import Data, DataDict, IncrID
-from Cobalt.Exceptions import DataCreationError, JobValidationError
+from Cobalt.Exceptions import DataCreationError, JobValidationError, ComponentLookupError
 from Cobalt.Components.base import Component, exposed, automatic, query
 import sets, thread, ConfigParser
+from Cobalt.Proxy import ComponentProxy
+
 
 __all__ = [
     "NodeCard",
@@ -141,6 +144,7 @@ class ProcessGroup (Data):
         self.cobalt_log_file = spec.get('cobalt_log_file')
         self.umask = spec.get('umask')
         self.exit_status = None
+        self.script_id = None
         self.location = spec.get('location') or []
         self.user = spec.get('user', "")
         self.executable = spec.get('executable')
@@ -203,6 +207,7 @@ class BGBaseSystem (Component):
         self._partitions_lock = thread.allocate_lock()
         self.pending_diags = dict()
         self.failed_diags = list()
+        self.pending_script_waits = sets.Set()
 
     def _get_partitions (self):
         return PartitionDict([
@@ -557,19 +562,29 @@ class BGBaseSystem (Component):
         return -cmp(float(dict1['walltime']), float(dict2['walltime']))
 
 
-    def find_queue_equivalence_classes(self, reservation_dict):
+    def find_queue_equivalence_classes(self, reservation_dict, active_queue_names):
         equiv = []
         for part in self.partitions.itervalues():
             if part.functional and part.scheduled:
+                part_active_queues = []
+                for q in part.queue.split(":"):
+                    if q in active_queue_names:
+                        part_active_queues.append(q)
+
+                # go on to the next partition if there are no running
+                # queues using this partition
+                if not part_active_queues:
+                    continue
+                
                 found_a_match = False
                 for e in equiv:
                     if e['data'].intersection(part.node_card_names):
-                        e['queues'].update(part.queue.split(":"))
+                        e['queues'].update(part_active_queues)
                         e['data'].update(part.node_card_names)
                         found_a_match = True
                         break
                 if not found_a_match:
-                    equiv.append( { 'queues': set(part.queue.split(":")), 'data': set(part.node_card_names), 'reservations': set() } ) 
+                    equiv.append( { 'queues': set(part_active_queues), 'data': set(part.node_card_names), 'reservations': set() } ) 
         
         real_equiv = []
         for eq_class in equiv:
@@ -625,3 +640,45 @@ class BGBaseSystem (Component):
         except:
             self.logger.error("failed to reserve partition '%s' until '%s'" % (partition_name, time))
     reserve_partition_until = exposed(reserve_partition_until)
+
+    # yarrrrr!   deadlock ho!!
+    # making more than one RPC call in the same atomic method is a recipe for disaster
+    # maybe i need a second automatic method to do the waiting?
+    def sm_sync(self):
+        '''Resynchronize with the script manager'''
+        print "starting sm_sync"
+        try:
+            pgroups = ComponentProxy("script-manager").get_jobs([{'id':'*', 'state':'*'}])
+        except (ComponentLookupError, xmlrpclib.Fault):
+            self.logger.error("Failed to communicate with script manager")
+            return
+        live = [item['id'] for item in pgroups]
+        print "live:", live
+        for each in self.process_groups.itervalues():
+            if each.mode == 'script' and each.script_id not in live:
+                self.logger.info("Found dead pg for script job %s" % (each.script_id))
+                self.pending_script_waits.add(each)
+        print "ending sm_sync"
+    sm_sync = automatic(sm_sync)
+
+    def handle_script_waits(self):
+        print "starting handle_script_waits"
+        # avoid the RPC call if there's nothing to be done
+        if not self.pending_script_waits:
+            print "ending handle_script_waits"
+            return
+        
+        specs = []
+        for pg in self.pending_script_waits:
+            specs.append( {'id':pg.script_id, 'exit_status':'*'} )
+        result = ComponentProxy("script-manager").wait_jobs(specs)
+        for r in result:
+            which_one = None
+            for pg in self.pending_script_waits:
+                if r['id'] == pg.script_id:
+                    which_one = pg
+                    pg.exit_status = r['exit_status']
+                    self.reserve_partition_until(pg.location[0], 1)
+            self.pending_script_waits.discard(which_one)
+        print "ending handle_script_waits"
+    handle_script_waits = automatic(handle_script_waits)

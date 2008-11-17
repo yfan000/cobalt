@@ -15,6 +15,7 @@ import random
 import time
 import thread
 import sets
+import xmlrpclib
 from datetime import datetime
 from ConfigParser import ConfigParser
 
@@ -29,7 +30,8 @@ from Cobalt.Components import bg_base_system
 from Cobalt.Data import Data, DataDict, IncrID
 from Cobalt.Components.base import Component, exposed, automatic, query
 from Cobalt.Components.bg_base_system import NodeCard, Partition, PartitionDict, ProcessGroupDict, BGBaseSystem
-from Cobalt.Exceptions import ProcessGroupCreationError
+from Cobalt.Exceptions import ProcessGroupCreationError, ComponentLookupError
+from Cobalt.Proxy import ComponentProxy
 
 __all__ = [
     "ProcessGroup", 
@@ -146,6 +148,7 @@ class Simulator (BGBaseSystem):
         self.failed_components = sets.Set()
         self.pending_diags = dict()
         self.failed_diags = list()
+        self.pending_script_waits = sets.Set()
         if self.config_file is not None:
             self.configure(self.config_file)
 
@@ -327,10 +330,33 @@ class Simulator (BGBaseSystem):
         """
         
         self.logger.info("add_process_groups(%r)" % (specs))
-        process_groups = self.process_groups.q_add(specs)
+        
+        script_specs = []
+        other_specs = []
+        for spec in specs:
+            if spec['mode'] == "script":
+                script_specs.append(spec)
+            else:
+                other_specs.append(spec)
+        
+        # start up script jobs
+        new_pgroups = []
+        if script_specs:
+            try:
+                for spec in script_specs:
+                    script_pgroup = ComponentProxy("script-manager").add_jobs([spec])
+                    self.reserve_partition_until(spec['location'][0], time.time() + 60*float(spec['walltime']))
+                    new_pgroup = self.process_groups.q_add([spec])
+                    new_pgroup[0].script_id = script_pgroup[0]['id']
+                    new_pgroups.append(new_pgroup[0])
+            except (ComponentLookupError, xmlrpclib.Fault):
+                raise ProcessGroupCreationError("system::add_process_groups failed to communicate with script-manager")
+
+        process_groups = self.process_groups.q_add(other_specs)
         for process_group in process_groups:
             self.start(process_group)
-        return  process_groups
+            
+        return new_pgroups + process_groups
     add_process_groups = exposed(query(all_fields=True)(add_process_groups))
     
     def get_process_groups (self, specs):
@@ -352,7 +378,13 @@ class Simulator (BGBaseSystem):
         self.logger.info("signal_process_groups(%r, %r)" % (specs, signame))
         process_groups = self.process_groups.q_get(specs)
         for process_group in process_groups:
-            process_group.signals.append(signame)
+            if process_group.mode == "script":
+                try:
+                    pgroup = ComponentProxy("script-manager").signal_jobs([{'id':process_group.script_id}], "SIGTERM")
+                except (ComponentLookupError, xmlrpclib.Fault):
+                    logger.error("Failed to communicate with script manager when killing job")
+            else:
+                process_group.signals.append(signame)
         return process_groups
     signal_process_groups = exposed(query(signal_process_groups))
     

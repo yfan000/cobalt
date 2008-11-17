@@ -452,7 +452,7 @@ class BGSched (Component):
             except (ComponentLookupError, xmlrpclib.Fault):
                 # the ForeignDataDicts already include FailureMode stuff
                 pass
-        print "took %f seconds for sync_data" % (time.time() - started, )
+        # print "took %f seconds for sync_data" % (time.time() - started, )
     sync_data = automatic(sync_data)
 
     def _run_reservation_jobs (self):
@@ -620,7 +620,7 @@ class BGSched (Component):
         for cur_res in self.reservations.values():
             res_info[cur_res.name] = cur_res.partitions
         try:
-            equiv = ComponentProxy("system").find_queue_equivalence_classes(res_info)
+            equiv = ComponentProxy("system").find_queue_equivalence_classes(res_info, [q.name for q in active_queues + spruce_queues])
         except:
             self.logger.error("failed to connect to system component")
             return
@@ -707,7 +707,7 @@ class BGSched (Component):
                 self._start_job(job, best_partition_dict[jobid])
     
 
-        print "took %f seconds for scheduling loop" % (time.time() - started_scheduling, )
+        # print "took %f seconds for scheduling loop" % (time.time() - started_scheduling, )
     schedule_jobs = automatic(schedule_jobs)
 
     
