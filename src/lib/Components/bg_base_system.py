@@ -535,7 +535,7 @@ class BGBaseSystem (Component):
             arg_list.sort(self._walltimecmp)
             for args in arg_list:
                 if 60*float(args['walltime']) > backfill_cutoff:
-                    break
+                    continue
                 
                 partition_name = self._find_job_location(args)
                 if partition_name:
