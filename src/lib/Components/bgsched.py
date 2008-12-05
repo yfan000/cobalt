@@ -453,7 +453,7 @@ class BGSched (Component):
                 item.Sync()
             except (ComponentLookupError, xmlrpclib.Fault):
                 # the ForeignDataDicts already include FailureMode stuff
-               pass
+                pass
         # print "took %f seconds for sync_data" % (time.time() - started, )
     sync_data = automatic(sync_data)
 
