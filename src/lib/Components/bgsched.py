@@ -378,6 +378,7 @@ class BGSched (Component):
     
         self.define_builtin_utility_functions()
         self.define_user_utility_functions()
+        self.get_current_time = time.time
 
     def __getstate__(self):
         return {'reservations':self.reservations, 'version':1,
@@ -402,6 +403,7 @@ class BGSched (Component):
         
         self.define_builtin_utility_functions()
         self.define_user_utility_functions()
+        self.get_current_time = time.time
 
 
     # order the jobs with biggest utility first
@@ -517,7 +519,7 @@ class BGSched (Component):
                 if not self.started_jobs.has_key(j.jobid):
                     active_jobs.append(j)
     
-            utility_scores = self._compute_utility_scores(active_jobs, time.time())
+            utility_scores = self._compute_utility_scores(active_jobs, self.get_current_time())
             if not utility_scores:
                 # if we've got no utility scores, either there were no active_jobs
                 # or an error occurred -- either way, give up now
@@ -587,8 +589,8 @@ class BGSched (Component):
             self.logger.error("failed to connect to queue manager")
             return
 
-        self.assigned_partitions[partition.name] = time.time()
-        self.started_jobs[job.jobid] = time.time()
+        self.assigned_partitions[partition.name] = self.get_current_time()
+        self.started_jobs[job.jobid] = self.get_current_time()
 
     def _find_best_partition(self, job, available_partitions):
         best_score = sys.maxint
@@ -602,7 +604,7 @@ class BGSched (Component):
                 really_okay = True
                 for res in self.reservations.itervalues():
                     # if the proposed job overlaps an active reservation, don't run it
-                    if res.overlaps(partition, time.time(), 60 * float(job.walltime) + SLOP_TIME):
+                    if res.overlaps(partition, self.get_current_time(), 60 * float(job.walltime) + SLOP_TIME):
                         really_okay = False
                         self.sched_info[job.jobid] = "overlaps reservation '%s'" % res.name
                         break
@@ -621,7 +623,7 @@ class BGSched (Component):
 
         return best_partition
 
-    def _compute_utility_scores (self, active_jobs, current_time):
+    def _compute_utility_scores (self, active_jobs, current_time, drain_wait=0):
         utility_scores = []
             
         # tack on a 0 so the list is never empty    
@@ -630,13 +632,14 @@ class BGSched (Component):
         for job in active_jobs:
             utility_name = self.queues[job.queue].policy
             args = {'queued_time':current_time - float(job.submittime), 
-                    'wall_time': float(job.walltime), 
+                    'wall_time': 60*float(job.walltime), 
                     'size': float(job.nodes),
                     'user_name': job.user,
                     'project': job.project,
                     'queue_priority': int(self.queues[job.queue].priority),
                     'machine_size': max_nodes,
                     'jobid': int(job.jobid),
+                    'drain_wait': drain_wait,
                     }
             try:
                 if utility_name in self.builtin_utility_functions:
@@ -683,7 +686,7 @@ class BGSched (Component):
         self.sync_state.Pass()
         
         # clean up the assigned_partitions cached data, and the started_jobs cached data
-        now = time.time()
+        now = self.get_current_time()
         for part_name in self.assigned_partitions.keys():
             if (now - self.assigned_partitions[part_name]) > 5*60:
                 del self.assigned_partitions[part_name]
@@ -815,28 +818,6 @@ class BGSched (Component):
             if spruce_jobs:
                 active_jobs = spruce_jobs
     
-            utility_scores = self._compute_utility_scores(active_jobs, now)
-            if not utility_scores:
-                # if we've got no utility scores, either there were no active_jobs
-                # or an error occurred -- either way, go on to the next equivalence class
-                continue
-            utility_scores.sort(self.utilitycmp)
-    
-            # this is the bit that actually picks which job to run
-            for tup in utility_scores:
-                job = tup[0]
-                if tup[1] < utility_scores[0][2]:
-                    self.sched_info[utility_scores[0][0].jobid] += "\n     wants to block other jobs from starting"
-                    # this break is meant to take us to the explicit back filling mumbo-jumbo
-                    break
-    
-                best_partition = self._find_best_partition(job, available_partitions)
-                if best_partition is not None:
-                    self._start_job(job, best_partition)
-                    return
-    
-            # oh mercy
-            # time for some explicit backfilling
             temp_jobs = [job for job in self.jobs.q_get([{'system_state':"running"}]) if job.queue in eq_class['queues']]
             end_times = []
             for job in temp_jobs:
@@ -864,10 +845,35 @@ class BGSched (Component):
             if end_times:
                 # add on an extra 2 minutes so that some jobs with the same walltime can start together 
                 cut_off = min(end_times) - now + 120
+                max_drain_wait = max(end_times) - now
             else:
                 # if nothing is running, we can't technically "back fill" and there's just nothing to run
                 # so we should examine the next equivalence class of queues
+                cut_off = 0
+                max_drain_wait = 0
+
+            utility_scores = self._compute_utility_scores(active_jobs, now, max_drain_wait)
+            if not utility_scores:
+                # if we've got no utility scores, either there were no active_jobs
+                # or an error occurred -- either way, go on to the next equivalence class
                 continue
+            utility_scores.sort(self.utilitycmp)
+    
+            # this is the bit that actually picks which job to run
+            for tup in utility_scores:
+                job = tup[0]
+                if tup[1] < utility_scores[0][2]:
+                    self.sched_info[utility_scores[0][0].jobid] += "\n     wants to block other jobs from starting"
+                    # this break is meant to take us to the explicit back filling mumbo-jumbo
+                    break
+    
+                best_partition = self._find_best_partition(job, available_partitions)
+                if best_partition is not None:
+                    self._start_job(job, best_partition)
+                    return
+    
+            # oh mercy
+            # time for some explicit backfilling
     
             utility_scores.sort(self.walltimecmp)
             

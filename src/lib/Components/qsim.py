@@ -94,7 +94,7 @@ class Job (Data):
     fields = Data.fields + ["jobid", "submittime", "queue", "walltime",
                             "nodes","runtime", "start_time", "end_time",
                             "failure_time", "location", "state", "is_visible",
-                            "args"]
+                            "args", "system_state", "starttime"]
 
     def __init__(self, spec):
         Data.__init__(self, spec)
@@ -113,6 +113,8 @@ class Job (Data):
         self.start_time = spec.get('start_time', '0')
         self.end_time = spec.get('end_time', '0')
         self.state = spec.get("state", "invisible")
+        self.system_state = ''
+        self.starttime = 0
         self.failure_time = 0
         self.is_visible = False
         self.args = []
@@ -143,13 +145,17 @@ class SimQueueDict(QueueDict):
     '''Queue Dict class for simulating, extended from cqm.QueueDict'''
     item_cls = SimQueue
     key = "name"
+
+    def __init__(self, policy):
+        QueueDict.__init__(self)
+        self.policy = policy
  
     def add_jobs(self, specs, callback=None, cargs={}):
         '''add jobs to queues, if specified queue not exist, create one''' 
         queue_names = self.keys()
         for spec in specs:
             if spec['queue'] not in queue_names:
-                self.add_queues([{"name":spec['queue']}])
+                self.add_queues([{"name":spec['queue'], "policy":self.policy}])
                 queue_names.append(spec['queue'])
                
         results = []
@@ -239,7 +245,7 @@ class Qsimulator(Simulator):
         #initialize time stamps and job queues
         self.time_stamps = [0]
         self.cur_time_index = 0
-        self.queues = SimQueueDict()
+        self.queues = SimQueueDict(policy=kwargs['policy'])
         self.init_queues()
         
         #initialize failures
@@ -488,8 +494,10 @@ class Qsimulator(Simulator):
         
         start = date_to_sec(self.get_current_time())
         updates['start_time'] = start
+        updates['starttime'] = start
         
         updates['state'] = 'running'
+        updates['system_state'] = 'running'
         print self.get_current_time(), "state change, job", jobspec['jobid'], \
              ":", jobspec['state'], "->", updates['state']
              
