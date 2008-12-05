@@ -287,6 +287,7 @@ class Simulator (BGBaseSystem):
 
         self._partitions_lock.acquire()
         partition.state = "busy"
+        partition.reserved_until = False
         self._partitions_lock.release()
         # explicitly call this, since the above "busy" is instantaneously available
         self.update_partition_state()
