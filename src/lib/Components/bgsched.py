@@ -263,7 +263,30 @@ class PartitionDict (ForeignDataDict):
                     if int(job.nodes) <= int(part.size) < desired:
                         desired = int(part.size)
         return target_partition._can_run(job) and int(target_partition.size) == desired
+
+    def possible_locations(self, available_partitions, job):
+        locations = []
+        for target_partition in self.itervalues():
+            if job.queue not in target_partition.queue.split(':'):
+                continue
+            desired = sys.maxint
+            usable = True
+            for part in self.itervalues():
+                if not part.functional:
+                    if target_partition.name in part.children or target_partition.name in part.parents:
+                        usable = False
+                        break
+                else:
+                    if part.scheduled:
+                        if int(job.nodes) <= int(part.size) < desired:
+                            desired = int(part.size)
+
+            if target_partition._can_run(job) and int(target_partition.size) == desired and usable:
+                locations.append(target_partition)
+         
+        return locations
                 
+              
 
 class Job (ForeignData):
     
@@ -404,7 +427,6 @@ class BGSched (Component):
         self.define_builtin_utility_functions()
         self.define_user_utility_functions()
         self.get_current_time = time.time
-
 
     # order the jobs with biggest utility first
     def utilitycmp(self, tuple1, tuple2):
@@ -623,6 +645,25 @@ class BGSched (Component):
 
         return best_partition
 
+    def _find_drain_partition(self, job, available_partitions):
+        drain_partition = None
+        locations = self.partitions.possible_locations(available_partitions, job)
+        
+        # good old chinese remainder theorem
+        # locations.sort( lambda x,y: cmp(x.name,y.name) )
+        # magic_number = 94026208275
+        # drain_partition = locations[magic_number % len(locations)]
+        
+        for p in locations:
+            if not drain_partition:
+                drain_partition = p
+            else:
+                if p.name < drain_partition.name:
+                    drain_partition = p
+
+        return drain_partition
+
+
     def _compute_utility_scores (self, active_jobs, current_time, drain_wait=0):
         utility_scores = []
             
@@ -676,7 +717,7 @@ class BGSched (Component):
 
     def schedule_jobs (self):
         '''look at the queued jobs, and decide which ones to start'''
-
+        start_time = time.time()
         if not self.active:
             return
         # if we're missing information, don't bother trying to schedule jobs
@@ -717,7 +758,7 @@ class BGSched (Component):
             if self.assigned_partitions.has_key(name):
                 del self.assigned_partitions[name]
                 
-        available_partitions = []
+        available_partitions = set()
         for partition in self.partitions.itervalues():
             okay_to_add = True
 
@@ -742,7 +783,7 @@ class BGSched (Component):
                     break
             
             if okay_to_add:
-                available_partitions.append(partition)
+                available_partitions.add(partition)
         
 
         active_queues = []
@@ -867,17 +908,29 @@ class BGSched (Component):
             utility_scores.sort(self.utilitycmp)
     
             # this is the bit that actually picks which job to run
-            for tup in utility_scores:
-                job = tup[0]
-                if tup[1] < utility_scores[0][2]:
-                    self.sched_info[utility_scores[0][0].jobid] += "\n     wants to block other jobs from starting"
-                    # this break is meant to take us to the explicit back filling mumbo-jumbo
-                    break
-    
-                best_partition = self._find_best_partition(job, available_partitions)
-                if best_partition is not None:
-                    self._start_job(job, best_partition)
-                    return
+            idx = 0
+            while idx < len(utility_scores):
+                winning_tuple = utility_scores[idx]
+                for jj in range(idx, len(utility_scores)):
+                    tup = utility_scores[jj]
+                    job = tup[0]
+                    if tup[1] < winning_tuple[2]:
+                        location = self._find_drain_partition(winning_tuple[0], available_partitions)
+                        # print "%s going to drain %s" % (winning_tuple[0].jobid, location.name)
+                        for p_name in location.parents:
+                            available_partitions.discard(self.partitions[p_name])
+                        for p_name in location.children:
+                            available_partitions.discard(self.partitions[p_name])
+                        available_partitions.discard(location)
+                        break
+        
+                    best_partition = self._find_best_partition(job, available_partitions)
+                    if best_partition is not None:
+                        self._start_job(job, best_partition)
+                        return
+                
+                idx += 1
+                    
     
             # oh mercy
             # time for some explicit backfilling
@@ -895,7 +948,9 @@ class BGSched (Component):
                     self.logger.info("backfilling job %s" % job.jobid)
                     return
 
-
+        end_time = time.time()
+        print "scheduling loop took:", (end_time - start_time)
+        
     schedule_jobs = automatic(schedule_jobs)
 
     
