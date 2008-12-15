@@ -917,10 +917,11 @@ class BGSched (Component):
                     if tup[1] < winning_tuple[2]:
                         location = self._find_drain_partition(winning_tuple[0], available_partitions)
                         # print "%s going to drain %s" % (winning_tuple[0].jobid, location.name)
-                        for p_name in location.parents:
-                            available_partitions.discard(self.partitions[p_name])
-                        for p_name in location.children:
-                            available_partitions.discard(self.partitions[p_name])
+                        if location is not None:
+                            for p_name in location.parents:
+                                available_partitions.discard(self.partitions[p_name])
+                            for p_name in location.children:
+                                available_partitions.discard(self.partitions[p_name])
                         available_partitions.discard(location)
                         break
         
