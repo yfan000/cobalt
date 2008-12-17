@@ -908,6 +908,7 @@ class BGSched (Component):
             utility_scores.sort(self.utilitycmp)
     
             # this is the bit that actually picks which job to run
+            backfill_available_partitions = available_partitions.copy()
             idx = 0
             while idx < len(utility_scores):
                 winning_tuple = utility_scores[idx]
@@ -943,7 +944,7 @@ class BGSched (Component):
                 if 60*float(job.walltime) > cut_off:
                     continue
     
-                best_partition = self._find_best_partition(job, available_partitions)
+                best_partition = self._find_best_partition(job, backfill_available_partitions)
                 if best_partition is not None:
                     self._start_job(job, best_partition)
                     self.logger.info("backfilling job %s" % job.jobid)
