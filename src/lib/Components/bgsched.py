@@ -648,9 +648,11 @@ class BGSched (Component):
             # get the cutoff time for backfilling
             temp_jobs = [job for job in self.jobs.q_get([{'system_state':"running"}]) if job.queue in eq_class['queues']]
             end_times = []
+            drain_end_times = []
             for job in temp_jobs:
                 end_time = float(job.starttime) + 60 * float(job.walltime)
                 end_times.append(end_time)
+                drain_end_times.append(end_time)
             
             for res_name in eq_class['reservations']:
                 cur_res = self.reservations[res_name]
@@ -663,15 +665,20 @@ class BGSched (Component):
                         done_after += cur_res.cycle
                     end_time = now + done_after
                 end_times.append(end_time)
+                if cur_res.is_active():
+                    drain_end_times.append(end_time)
     
             if end_times:
                 # add on an extra 2 minutes so that some jobs with the same walltime can start together 
                 cut_off = min(end_times) - now + 120
-                max_drain_wait = max(end_times) - now
             else:
                 # if nothing is running, we can't technically "back fill" and there's just nothing to run
                 cut_off = 0
-                max_drain_wait = 0
+            
+            if drain_end_times:
+                max_drain_wait = max(drain_end_times) - now
+            else:
+                max_drain_wait = 0            
             
             utility_scores = self._compute_utility_scores(active_jobs, now, max_drain_wait)
             if not utility_scores:
