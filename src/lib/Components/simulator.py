@@ -14,6 +14,7 @@ import operator
 import random
 import time
 import thread
+import threading
 import sets
 import xmlrpclib
 from datetime import datetime
@@ -148,7 +149,6 @@ class Simulator (BGBaseSystem):
         self.failed_components = sets.Set()
         self.pending_diags = dict()
         self.failed_diags = list()
-        self.pending_script_waits = sets.Set()
         if self.config_file is not None:
             self.configure(self.config_file)
 
@@ -162,6 +162,7 @@ class Simulator (BGBaseSystem):
                     logger.info("Partition %s is no longer defined" % pname)
 
         self.update_relatives()
+        self.lock = threading.Lock()
         
     def save_me(self):
         Component.save(self)
@@ -286,8 +287,11 @@ class Simulator (BGBaseSystem):
             return False
 
         self._partitions_lock.acquire()
-        partition.state = "busy"
-        partition.reserved_until = False
+        try:
+            partition.state = "busy"
+            partition.reserved_until = False
+        except:
+            self.logger.error("error in reserve_partition", exc_info=True)
         self._partitions_lock.release()
         # explicitly call this, since the above "busy" is instantaneously available
         self.update_partition_state()
@@ -312,7 +316,10 @@ class Simulator (BGBaseSystem):
             return False
                 
         self._partitions_lock.acquire()
-        partition.state = "idle"
+        try:
+            partition.state = "idle"
+        except:
+            self.logger.error("error in release_partition", exc_info=True)
         self._partitions_lock.release()
         
         # explicitly unblock the blocked partitions
@@ -542,48 +549,53 @@ class Simulator (BGBaseSystem):
             nc.used_by = ''
 
         self._partitions_lock.acquire()
-                    
-        for p in self._partitions.values():
-            p._update_node_cards()
+        try:
+            for p in self._partitions.values():
+                p._update_node_cards()
+                
+            now = time.time()
             
-        now = time.time()    
-        for p in self._partitions.values():
-            if p.state != "busy":
-                # since we don't have the bridge, a partition which isn't busy
-                # should be set to idle and then blocked states can be derived
-                p.state = "idle"
-                if p.reserved_until:
-                    p.state = "starting job"
-                    for part in p._parents:
-                        if part.state == "idle":
-                            part.state = "blocked by starting job"
-                    for p in p._children:
-                        if part.state == "idle":
-                            part.state = "blocked by starting job"
-                for diag_part in self.pending_diags:
-                    if p.name == diag_part.name or p.name in diag_part.parents or p.name in diag_part.children:
-                        p.state = "blocked by pending diags"
-                for nc in p.node_cards:
-                    if nc.used_by:
-                        p.state = "blocked (%s)" % nc.used_by
-                        break
-                for dep_name in p._wiring_conflicts:
-                    if self._partitions[dep_name].state == "busy":
-                        p.state = "blocked-wiring (%s)" % dep_name
-                        break
-                for part_name in self.failed_diags:
-                    part = self._partitions[part_name]
-                    if p.name == part.name:
-                        p.state = "failed diags"
-                    elif p.name in part.parents or p.name in part.children:
-                        p.state = "blocked by failed diags"
-            else:
-                p.reserved_until = False
-
-            if p.reserved_until:
-                if now > p.reserved_until:
+            # since we don't have the bridge, a partition which isn't busy
+            # should be set to idle and then blocked states can be derived
+            for p in self._partitions.values():
+                if p.state != "busy":
+                    p.state = "idle"
+                    
+            for p in self._partitions.values():
+                if p.state != "busy":
+                    if p.reserved_until:
+                        p.state = "starting job"
+                        for part in p._parents:
+                            if part.state == "idle":
+                                part.state = "blocked by starting job"
+                        for part in p._children:
+                            if part.state == "idle":
+                                part.state = "blocked by starting job"
+                    for diag_part in self.pending_diags:
+                        if p.name == diag_part.name or p.name in diag_part.parents or p.name in diag_part.children:
+                            p.state = "blocked by pending diags"
+                    for nc in p.node_cards:
+                        if nc.used_by:
+                            p.state = "blocked (%s)" % nc.used_by
+                            break
+                    for dep_name in p._wiring_conflicts:
+                        if self._partitions[dep_name].state == "busy":
+                            p.state = "blocked-wiring (%s)" % dep_name
+                            break
+                    for part_name in self.failed_diags:
+                        part = self._partitions[part_name]
+                        if p.name == part.name:
+                            p.state = "failed diags"
+                        elif p.name in part.parents or p.name in part.children:
+                            p.state = "blocked by failed diags"
+                else:
                     p.reserved_until = False
-
+    
+                if p.reserved_until:
+                    if now > p.reserved_until:
+                        p.reserved_until = False
+        except:
+            self.logger.error("error in update_partition_state", exc_info=True)
         
         self._partitions_lock.release()
     update_partition_state = automatic(update_partition_state)

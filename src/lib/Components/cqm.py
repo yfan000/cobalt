@@ -12,6 +12,7 @@ import time
 import xmlrpclib
 import ConfigParser
 import sets
+import threading
 
 import Cobalt
 import Cobalt.Util
@@ -1069,6 +1070,8 @@ class QueueManager(Component):
         
         self.prevdate = time.strftime("%m-%d-%y", time.localtime())
         self.cqp = Cobalt.Cqparse.CobaltLogParser()
+        self.lock = threading.Lock()
+
 
     def save_me(self):
         Component.save(self)

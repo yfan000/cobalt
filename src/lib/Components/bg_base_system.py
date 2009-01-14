@@ -207,7 +207,6 @@ class BGBaseSystem (Component):
         self._partitions_lock = thread.allocate_lock()
         self.pending_diags = dict()
         self.failed_diags = list()
-        self.pending_script_waits = sets.Set()
 
     def _get_partitions (self):
         return PartitionDict([
@@ -222,10 +221,14 @@ class BGBaseSystem (Component):
         specs = [{'name':spec.get("name")} for spec in specs]
         
         self._partitions_lock.acquire()
-        partitions = [
-            partition for partition in self._partitions.q_get(specs)
-            if partition.name not in self._managed_partitions
-        ]
+        try:
+            partitions = [
+                partition for partition in self._partitions.q_get(specs)
+                if partition.name not in self._managed_partitions
+            ]
+        except:
+            partitions = []
+            self.logger.error("error in add_partitions", exc_info=True)
         self._partitions_lock.release()
         
         self._managed_partitions.update([
@@ -238,7 +241,11 @@ class BGBaseSystem (Component):
     def get_partitions (self, specs):
         """Query partitions on simulator."""
         self._partitions_lock.acquire()
-        partitions = self.partitions.q_get(specs)
+        try:
+            partitions = self.partitions.q_get(specs)
+        except:
+            partitions = []
+            self.logger.error("error in get_partitions", exc_info=True)
         self._partitions_lock.release()
         
         return partitions
@@ -255,10 +262,14 @@ class BGBaseSystem (Component):
         self.logger.info("del_partitions(%r)" % (specs))
         
         self._partitions_lock.acquire()
-        partitions = [
-            partition for partition in self._partitions.q_get(specs)
-            if partition.name in self._managed_partitions
-        ]
+        try:
+            partitions = [
+                partition for partition in self._partitions.q_get(specs)
+                if partition.name in self._managed_partitions
+            ]
+        except:
+            partitions = []
+            self.logger.error("error in del_partitions", exc_info=True)
         self._partitions_lock.release()
         
         self._managed_partitions -= sets.Set( [partition.name for partition in partitions] )
@@ -273,7 +284,11 @@ class BGBaseSystem (Component):
             part.update(newattr)
             
         self._partitions_lock.acquire()
-        partitions = self._partitions.q_get(specs, _set_partitions, updates)
+        try:
+            partitions = self._partitions.q_get(specs, _set_partitions, updates)
+        except:
+            partitions = []
+            self.logger.error("error in set_partitions", exc_info=True)
         self._partitions_lock.release()
         return partitions
     set_partitions = exposed(query(set_partitions))
@@ -648,7 +663,7 @@ class BGBaseSystem (Component):
         '''Resynchronize with the script manager'''
         print "starting sm_sync"
         try:
-            pgroups = ComponentProxy("script-manager").get_jobs([{'id':'*', 'state':'*'}])
+            pgroups = ComponentProxy("script-manager").get_jobs([{'id':'*', 'state':'running'}])
         except (ComponentLookupError, xmlrpclib.Fault):
             self.logger.error("Failed to communicate with script manager")
             return
@@ -657,28 +672,13 @@ class BGBaseSystem (Component):
         for each in self.process_groups.itervalues():
             if each.mode == 'script' and each.script_id not in live:
                 self.logger.info("Found dead pg for script job %s" % (each.script_id))
-                self.pending_script_waits.add(each)
+                result = ComponentProxy("script-manager").wait_jobs([{'id':each.script_id, 'exit_status':'*'}])
+                for r in result:
+                    which_one = None
+                    if r['id'] == each.script_id:
+                        each.exit_status = r['exit_status']
+                        self.reserve_partition_until(each.location[0], 1)
+
         print "ending sm_sync"
     sm_sync = automatic(sm_sync)
 
-    def handle_script_waits(self):
-        print "starting handle_script_waits"
-        # avoid the RPC call if there's nothing to be done
-        if not self.pending_script_waits:
-            print "ending handle_script_waits"
-            return
-        
-        specs = []
-        for pg in self.pending_script_waits:
-            specs.append( {'id':pg.script_id, 'exit_status':'*'} )
-        result = ComponentProxy("script-manager").wait_jobs(specs)
-        for r in result:
-            which_one = None
-            for pg in self.pending_script_waits:
-                if r['id'] == pg.script_id:
-                    which_one = pg
-                    pg.exit_status = r['exit_status']
-                    self.reserve_partition_until(pg.location[0], 1)
-            self.pending_script_waits.discard(which_one)
-        print "ending handle_script_waits"
-    handle_script_waits = automatic(handle_script_waits)

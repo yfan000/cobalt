@@ -9,6 +9,7 @@ import time
 import math
 import types
 import ConfigParser
+import threading
 try:
     set()
 except:
@@ -16,7 +17,7 @@ except:
 
 import Cobalt.Logging, Cobalt.Util
 from Cobalt.Data import Data, DataDict, ForeignData, ForeignDataDict
-from Cobalt.Components.base import Component, exposed, automatic, query
+from Cobalt.Components.base import Component, exposed, automatic, query, locking
 from Cobalt.Proxy import ComponentProxy
 from Cobalt.Exceptions import ReservationError, DataCreationError, ComponentLookupError
 import xmlrpclib
@@ -346,6 +347,8 @@ class BGSched (Component):
         self.define_builtin_utility_functions()
         self.define_user_utility_functions()
         self.get_current_time = time.time
+        self.lock = threading.Lock()
+
 
 
     # order the jobs with biggest utility first
@@ -455,11 +458,11 @@ class BGSched (Component):
                 # the ForeignDataDicts already include FailureMode stuff
                 pass
         # print "took %f seconds for sync_data" % (time.time() - started, )
-    sync_data = automatic(sync_data)
+    #sync_data = automatic(sync_data)
 
-    def _run_reservation_jobs (self):
+    def _run_reservation_jobs (self, reservations_cache):
         # handle each reservation separately, as they shouldn't be competing for resources
-        for cur_res in self.reservations.itervalues():
+        for cur_res in reservations_cache.itervalues():
             queue = cur_res.queue
             if not (self.queues.has_key(queue) and self.queues[queue].state == 'running'):
                 continue
@@ -571,11 +574,28 @@ class BGSched (Component):
 
         if not self.active:
             return
+        
+        self.sync_data()
+        
         # if we're missing information, don't bother trying to schedule jobs
         if not (self.queues.__oserror__.status and self.jobs.__oserror__.status):
             self.sync_state.Fail()
             return
         self.sync_state.Pass()
+        
+        self.lock.acquire()
+        try:
+            # cleanup any reservations which have expired
+            for res in self.reservations.values():
+                if res.is_over():
+                    self.logger.info("reservation %s has ended; removing" % res.name)
+                    self.reservations.q_del([{'name': res.name}])
+    
+            reservations_cache = self.reservations.copy()
+        except:
+            # just to make sure we don't keep the lock forever
+            pass
+        self.lock.release()
         
         # clean up the started_jobs cached data
         now = self.get_current_time()
@@ -586,24 +606,10 @@ class BGSched (Component):
         # cleanup the sched_info information if a job is no longer listed as "active"
         self.sched_info = {}
         
-        # cleanup any reservations which have expired
-        for res in self.reservations.values():
-            if res.is_over():
-                self.logger.info("reservation %s has ended; removing" % res.name)
-                self.reservations.q_del([{'name': res.name}])
-                
-        scriptm = ComponentProxy("script-manager")
-        
-        try:
-            script_locations = [job['location'][0] for job in scriptm.get_jobs([{'location':"*"}])]
-        except ComponentLookupError:
-            self.logger.error("failed to connect to script manager")
-            return
-
         active_queues = []
         spruce_queues = []
         res_queues = set()
-        for item in self.reservations.q_get([{'queue':'*'}]):
+        for item in reservations_cache.q_get([{'queue':'*'}]):
             if self.queues.has_key(item.queue):
                 if self.queues[item.queue].state == 'running':
                     res_queues.add(item.queue)
@@ -616,11 +622,11 @@ class BGSched (Component):
                     active_queues.append(queue)
         
         # handle the reservation jobs that might be ready to go
-        self._run_reservation_jobs()
+        self._run_reservation_jobs(reservations_cache)
 
         # figure out stuff about queue equivalence classes
         res_info = {}
-        for cur_res in self.reservations.values():
+        for cur_res in reservations_cache.values():
             res_info[cur_res.name] = cur_res.partitions
         try:
             equiv = ComponentProxy("system").find_queue_equivalence_classes(res_info, [q.name for q in active_queues + spruce_queues])
@@ -655,7 +661,7 @@ class BGSched (Component):
                 drain_end_times.append(end_time)
             
             for res_name in eq_class['reservations']:
-                cur_res = self.reservations[res_name]
+                cur_res = reservations_cache[res_name]
 
                 if not cur_res.cycle:
                     end_time = float(cur_res.start) + float(cur_res.duration)
@@ -693,9 +699,9 @@ class BGSched (Component):
             job_location_args = []
             for tup in utility_scores:
                 job = tup[0]
-                forbidden_locations = set(script_locations)
+                forbidden_locations = set()
                 for res_name in eq_class['reservations']:
-                    cur_res = self.reservations[res_name]
+                    cur_res = reservations_cache[res_name]
                     if cur_res.overlaps(self.get_current_time(), 60 * float(job.walltime) + SLOP_TIME):
                         forbidden_locations.update(cur_res.partitions.split(":"))
 
@@ -720,7 +726,7 @@ class BGSched (Component):
     
 
         # print "took %f seconds for scheduling loop" % (time.time() - started_scheduling, )
-    schedule_jobs = automatic(schedule_jobs)
+    schedule_jobs = locking(automatic(schedule_jobs))
 
     
     def get_sched_info(self):
