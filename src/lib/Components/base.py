@@ -13,7 +13,6 @@ import sys
 import getopt
 import logging
 import time
-import threading
 import xmlrpclib
 
 import Cobalt
@@ -142,14 +141,9 @@ def automatic (func, period=10):
     func.automatic_ts = -1
     return func
 
-def auto_no_lock (func):
-    """Mark a function as being internally thread safe"""
-    func.auto_no_lock = True
-    return func
-
-def readonly (func):
-    """Mark a function as read-only -- no data effects in component inst"""
-    func.readonly = True
+def forkable (func):
+    '''mark a handler as forkable'''
+    func.forkable = True
     return func
 
 def query (func=None, **kwargs):
@@ -202,7 +196,6 @@ class Component (object):
         if kwargs.get("register", True):
             Cobalt.Proxy.register_component(self)
         self.logger = logging.getLogger("%s %s" % (self.implementation, self.name))
-        self.lock = threading.Lock()
         
     def save (self, statefile=None):
         """Pickle the component.
@@ -238,18 +231,9 @@ class Component (object):
         """
         for name, func in inspect.getmembers(self, callable):
             if getattr(func, "automatic", False):
-                need_to_lock = not getattr(func, 'auto_no_lock', False)
                 if (time.time() - func.automatic_ts) > \
                    func.automatic_period:
-                    if need_to_lock:
-                        self.lock.acquire()
-                    try:
-                        func()
-                    except:
-                        self.logger("Automatic method %s failed" \
-                                    % (name), exc_info=1)
-                    if need_to_lock:
-                        self.lock.release()
+                    func()
                     func.__dict__['automatic_ts'] = time.time()
 
     def _resolve_exposed_method (self, method_name):
