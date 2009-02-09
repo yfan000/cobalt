@@ -231,10 +231,11 @@ class Component (object):
         """
         for name, func in inspect.getmembers(self, callable):
             if getattr(func, "automatic", False):
-                if (time.time() - func.automatic_ts) > \
-                   func.automatic_period:
-                    func()
-                    func.__dict__['automatic_ts'] = time.time()
+                if (time.time() - func.automatic_ts) > func.automatic_period:
+                    try:
+                        func()
+                    finally:
+                        func.__dict__['automatic_ts'] = time.time()
 
     def _resolve_exposed_method (self, method_name):
         """Resolve an exposed method.

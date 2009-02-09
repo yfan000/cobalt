@@ -11,7 +11,7 @@ import ConfigParser
 import popen2
 from datetime import date, datetime
 from getopt import getopt, GetoptError
-from Cobalt.Exceptions import TimeFormatError
+from Cobalt.Exceptions import TimeFormatError, TimerException
 import logging
 
 import Cobalt
@@ -441,3 +441,64 @@ def processfilter(cmdstr, jobdict):
                 jobdict[key].update(eval(value))
             else:
                 jobdict[key] = value
+
+
+class Timer (object):
+    '''the timer object keeps track of start, stop and elapsed times'''
+    def __init__(self, max_time = None):
+        self.__start_times = []
+        self.__stop_times = []
+        if max_time != None and max_time < 0:
+            raise TimerException, "maximum time may not be negative (max_time=%s)" % (max_time,)
+        self.__max_time = max_time
+        self.__elapsed_time = 0.0
+    
+    def start(self):
+        '''(re)start time tracking'''
+        if self.is_active:
+            raise TimerException, "timer already started"
+        self.__start_times.append(time.time())
+        
+    def stop(self):
+        '''stop time tracking'''
+        if not self.is_active:
+            raise TimerException, "timer not active"
+        self.__stop_times.append(time.time())
+        self.__elapsed_time += self.__stop_times[-1] - self.__start_times[-1]
+
+    def __get_is_active(self):
+        '''determine if the timer is currently running'''
+        return len(self.__start_times) > len(self.__stop_times)
+
+    is_active = property(__get_is_active, doc = "flag indicating if the time is currently active")
+
+    def __get_elapsed_time(self):
+        '''get the time elapsed while the timer has been active, including any current activity'''
+        if not self.is_active:
+            return self.__elapsed_time
+        else:
+            return self.__elapsed_time + time.time() - self.__start_times[-1]
+
+    elapsed_time = property(__get_elapsed_time, doc = "time elapsed while the has been active, including any current activity")
+
+    def __get_has_expired(self):
+        '''determine if the timer has expired'''
+        if self.__max_time != None:
+            return self.elapsed_time > self.__max_time
+        else:
+            # raise TimerException, "timer does not have a maximum time associated with it"
+            return False
+
+    has_expired = property(__get_has_expired, doc = "flag indicating if the timer has expired")
+
+    def __get_start_times(self):
+        '''create and return a duplicate list of the start times'''
+        return list(self.__start_times)
+
+    start_times = property(__get_start_times, doc = "list of start times")
+
+    def __get_stop_times(self):
+        '''create and return a duplicate list of the stop times'''
+        return list(self.__stop_times)
+
+    stop_times = property(__get_stop_times, doc = "list of end times")

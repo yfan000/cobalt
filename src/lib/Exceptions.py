@@ -49,6 +49,23 @@ class JobValidationError(Exception):
     log = False
     fault_code = fault_code_counter.next()
 
+class JobProcessingError (Exception):
+    fault_code = fault_code_counter.next()
+    def __init__(self, msg, jobid, user, state, event):
+        self.args = (msg, jobid, user)
+        self.msg = msg
+        self.jobid = jobid
+        self.user = user
+        self.state = state
+        self.event = event
+
+class JobPreemptionError (Exception):
+    fault_code = fault_code_counter.next()
+    def __init__(self, msg, jobid):
+        self.args = (jobid, msg)
+        self.msg = msg
+        self.jobid = jobid
+
 class DataStateError(Exception):
     log = True
     fault_code = fault_code_counter.next()

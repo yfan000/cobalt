@@ -124,16 +124,17 @@ class PartitionDict (DataDict):
     key = "name"
 
 class ProcessGroup (Data):
-    required_fields = ['user', 'executable', 'args', 'location', 'size', 'cwd']
+    required_fields = ['jobid', 'user', 'executable', 'args', 'location', 'size', 'cwd']
     fields = Data.fields + [
-        "id", "user", "size", "cwd", "executable", "env", "args", "location",
+        "id", "jobid", "user", "size", "cwd", "executable", "env", "args", "location",
         "head_pid", "stdin", "stdout", "stderr", "exit_status", "state",
-        "mode", "kerneloptions", "true_mpi_args",
+        "mode", "kernel", "kerneloptions", "true_mpi_args",
     ]
 
     def __init__(self, spec):
         Data.__init__(self, spec)
         self.id = spec.get("id")
+        self.jobid = spec.get("jobid")
         self.head_pid = None
         self.stdin = spec.get('stdin')
         self.stdout = spec.get('stdout')

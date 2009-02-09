@@ -3,16 +3,20 @@ import tempfile
 import Cobalt
 
 fd, config_file = tempfile.mkstemp()
-open(config_file, "w").write("""
+fp = open(config_file, "w")
+fp.write("""
 [bgpm]
 mpirun: /usr/bin/mpirun
 
+[bgsystem]
+bgkernel: false
+
 [cqm]
 log_dir: /tmp
-bgkernel: false
 
 [bgsched]
 utility_file: /tmp/asdf
 """)
+fp.close()
 
 Cobalt.CONFIG_FILES = [config_file]

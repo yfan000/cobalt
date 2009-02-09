@@ -5,13 +5,16 @@ import time
 import traceback
 import logging
 
+# import Cobalt
+# Cobalt.CONFIG_FILES = ()
+
 from Cobalt.Components.slp import TimingServiceLocator
 from Cobalt.Components.cqm import QueueManager
 from Cobalt.Components.simulator import Simulator
 from Cobalt.Components.scriptm import ScriptManager
 from Cobalt.Proxy import ComponentProxy
-from Cobalt.Exceptions import ComponentLookupError
 import Cobalt.Proxy
+from Cobalt.Exceptions import ComponentLookupError
 from TestCobalt.Utilities.ThreadSupport import *
 
 class TSQueueManager (QueueManager):
@@ -99,22 +102,22 @@ class TestIntegration (object):
         locations = simulator.find_job_location(job_location_args, 0, 3600)
         assert locations.has_key(jobid)
 
-        partition = locations[jobid]
-        cqm.run_jobs([{'jobid':jobid}], [partition])
+        location = locations[jobid]
+        cqm.run_jobs([{'jobid':jobid}], location)
 
-        r = cqm.get_jobs([{'jobid':jobid, 'state':"*", 'system_state':"running"}])
+        r = cqm.get_jobs([{'jobid':jobid, 'state':"*", 'is_active':True}])
         if not r:
             assert not "the job didn't start"
     
         time.sleep(20)
         
-        r = cqm.get_jobs([{'jobid':jobid, 'state':"*", 'system_state':"running"}])
+        r = cqm.get_jobs([{'jobid':jobid, 'state':"*", 'is_active':True}])
         if len(r) != 1:
             assert not "the job has stopped running prematurely"
 
         start_time = time.time()
         while True:
-            r = cqm.get_jobs([{'jobid':jobid, 'state':"*", 'system_state':"running"}])
+            r = cqm.get_jobs([{'jobid':jobid, 'state':"*", 'is_active':True}])
             if r:
                 if time.time() - start_time > 240:
                     assert not "the job seems to have run overtime"
@@ -138,16 +141,16 @@ class TestIntegration (object):
         locations = simulator.find_job_location(job_location_args, 0, 3600)
         assert locations.has_key(jobid)
 
-        partition = locations[jobid]
-        cqm.run_jobs([{'jobid':jobid}], [partition])
+        location = locations[jobid]
+        cqm.run_jobs([{'jobid':jobid}], location)
 
-        r = cqm.get_jobs([{'jobid':jobid, 'state':"*", 'system_state':"running"}])
+        r = cqm.get_jobs([{'jobid':jobid, 'state':"*", 'is_active':True}])
         if not r:
             assert not "the job didn't start"
         
         time.sleep(20)
         
-        r = cqm.get_jobs([{'jobid':jobid, 'system_state':"running"}])
+        r = cqm.get_jobs([{'jobid':jobid, 'is_active':True}])
         if len(r) != 1:
             assert not "the job has stopped running prematurely"
                                         
@@ -155,7 +158,7 @@ class TestIntegration (object):
         
         start_time = time.time()
         while True:
-            r = cqm.get_jobs([{'jobid':jobid, 'system_state':"running"}])
+            r = cqm.get_jobs([{'jobid':jobid, 'is_active':True}])
             if r:
                 if time.time() - start_time > 30:
                     assert not "the job didn't die when asked to"
