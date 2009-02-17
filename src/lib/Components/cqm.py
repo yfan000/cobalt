@@ -94,10 +94,17 @@ from Cobalt.Data import Data, DataList, DataDict, IncrID
 from Cobalt.StateMachine import StateMachine
 from Cobalt.Components.base import Component, exposed, automatic, query
 from Cobalt.Proxy import ComponentProxy
-from Cobalt.Exceptions import QueueError, ComponentLookupError, DataStateError, DataStateTransitionError, \
-    StateMachineError, StateMachineIllegalEventError, StateMachineNonexistentEventError, JobProcessingError, JobPreemptionError
+from Cobalt.Exceptions import (QueueError, ComponentLookupError,
+    DataStateError, DataStateTransitionError, StateMachineError,
+    StateMachineIllegalEventError, StateMachineNonexistentEventError,
+    JobProcessingError, JobPreemptionError)
+import accounting
+
 
 logger = logging.getLogger('cqm')
+accounting_logger = logging.getLogger("cqm.accounting")
+accounting_logger.addHandler(
+    accounting.DatetimeFileHandler("/var/log/cobalt/%Y%m%d"))
 cqm_id_gen = None
 
 config = ConfigParser.ConfigParser()
@@ -241,6 +248,14 @@ class Job (StateMachine):
     """
     
     acctlog = Cobalt.Util.AccountingLog('qm')
+    
+    # properties for easier accounting logging
+    ctime = property(lambda self: self.__timers['queue'].start_times[0])
+    qtime = property(lambda self:
+        self.__timers['current_queue'].start_times[0])
+    start = property(lambda self: self.__timers['user'].start_times[0])
+    exec_host = property(lambda self: ":".join(self.location))
+    end = property(lambda self: self.__timers['user'].stop_times[-1])
     
     fields = Data.fields + [
         "jobid", "jobname", "state", "attribute", "location", "starttime", "submittime", "endtime", "queue", "type", "user",
@@ -488,9 +503,6 @@ class Job (StateMachine):
             user = Timer(),
         )
 
-        # setup the pbs logger for this job
-        self.pbslog = Cobalt.Util.PBSLog(self.jobid)
-
         # setting the queue with cause updated accounting records to be written and the current queue timer to be restarted, so
         # this needs to be done only after the object has been initialized
         self.queue = spec.get("queue", "default")
@@ -507,7 +519,7 @@ class Job (StateMachine):
     def __getstate__(self):
         data = {}
         for key, value in self.__dict__.iteritems():
-            if key not in ['log', 'comms', 'acctlog', 'pbslog']:
+            if key not in ['log', 'comms', 'acctlog']:
                 data[key] = value
         return data
 
@@ -518,9 +530,6 @@ class Job (StateMachine):
         if not self.__timers.has_key('current_queue'):
             self.__timers['current_queue'] = Timer()
             self.__timers['current_queue'].start()
-        # NOTE: acctlog is set when the object is defined, not instantiated, so it's value does not (and should not) be restored
-        # self.acctlog = Cobalt.Util.AccountingLog('qm')
-        self.pbslog = Cobalt.Util.PBSLog(self.jobid)
     
     def __task_signal(self, retry = True):
         '''send a signal to the managed task'''
@@ -745,9 +754,7 @@ class Job (StateMachine):
     def __sm_check_job_timers(self):
         if self.__max_job_timer.has_expired:
             # if the job execution time has exceeded the wallclock time, then inform the task that it must terminate
-            self.pbslog.log("A",
-                # No attributes.
-            )
+            accounting_logger.info(accounting.abort(self.jobid))
             self.__sm_log_info("maximum execution time exceeded; initiating job terminiation")
             return Signal_Info(Signal_Info.Reason.time_limit, Signal_Map.terminate)
         else:
@@ -947,35 +954,13 @@ class Job (StateMachine):
 
         self.location = args['nodelist']
 
-        # create a pbs start-of-job record
-        walltime_minutes = int(float(self.walltime)) % 60
-        walltime_hours = int(float(self.walltime)) // 60
-        
-        self.pbslog.log("S",
-            user = self.user, # the user name under which the job will execute
-            #group = , # the group name under which the job will execute
-            jobname = self.jobname, # the name of the job
-            queue = self.queue, # the name of the queue in which the job resides
-            ctime = self.__timers['queue'].start_times[0], # time in seconds when job was created (first submitted)
-            qtime = self.__timers['current_queue'].start_times[0], # time in seconds when job was queued into current queue
-            etime = self.__get_etime(), # time in seconds when job became eligible to run; no holds, etc.
-            start = self.__timers['user'].start_times[0], # time in seconds when job execution started
-            exec_host = ":".join(self.location), # name of host on which the job is being executed 
-                                                 # (location is a :-separated list of nodes)
-            #Resource_List__dot__RES = , # limit for use of RES
-            Resource_List__dot__ncpus = self.procs, # max number of cpus
-            Resource_List__dot__nodect = self.nodes, # max number of nodes
-            #Resource_List__dot__nodes = , # 6:ppn=4
-            #Resource_List__dot__place = , # scatter
-            #Resource_List__dot__select = , # 6:ncpus=4
-            Resource_List__dot__walltime = "%02d:%02d:00" % (walltime_hours, walltime_minutes),
-            #session = , # session number of job
-            #accountint_id = , # identifier associated with system-generated accounting data
-            mode = self.mode,
-            cwd = self.cwd,
-            exe = self.command,
-            args = " ".join(self.args)
-        )
+        # group and session are unknown
+        accounting_logger.info(accounting.start(self.jobid, self.user,
+            "unknown", self.jobname, self.queue, self.ctime, self.qtime,
+            self.etime, self.start, self.exec_host,
+            {'ncpus':self.procs, 'nodect':self.nodes,
+                'walltime':timedelta(minutes=self.walltime)},
+            "unknown"))
 
         # write job start and project information to CQM and accounting logs
         if self.reservation:
@@ -1187,7 +1172,7 @@ class Job (StateMachine):
         self.__sm_log_info("user delete with signal %s requested by user %s; initiating job cleanup and removal" % \
             (args['signal'], args['user']), cobalt_log = True)
 
-        # set signal information so that the terminal state handler knows to write the delete record to the pbs log
+        # set signal information so that the terminal state handler knows to write the delete record
         self.__signaled_info = Signal_Info(Signal_Info.Reason.delete, args['signal'], args['user'])
 
         # start the resource epilogue scripts
@@ -1490,15 +1475,12 @@ class Job (StateMachine):
             logger.info("Job %s/%s/Q:%s: Preempted job" % (self.jobid, self.user, self.queue))
             self.acctlog.LogMessage("Job %s/%s/Q:%s: Preempted job" % (self.jobid, self.user, self.queue))
 
-        # create a pbs abort record to represent the preemption of the job
-        self.pbslog.log("A",
-            # No attributes.
-        )
+        accounting_logger.info(accounting.abort(self.jobid))
 
         self.__sm_log_info("job successfully preempted", cobalt_log = True)
         self.__preempts += 1
 
-        # stop the execution timer and output pbs log entry
+        # stop the execution timer and output accounting log entry
         self.__timers['user'].stop()
         self.__max_job_timer.stop()
         if self.__max_job_timer.has_expired:
@@ -1540,11 +1522,7 @@ class Job (StateMachine):
         # set the list of resources being used
         self.location = args['nodelist']
 
-        # create a pbs job rerun record
-        self.pbslog.log("R",
-            exec_host = ":".join(self.location), # name of host on which the job is being executed
-                                                 # (location is a :-separated list of nodes)
-        )
+        accounting_logger.info(accounting.rerun(self.jobid))
 
         # write job rerun information to CQM and accounting logs
         if self.project:
@@ -1577,7 +1555,7 @@ class Job (StateMachine):
         self.__sm_log_info("user delete with signal %s requested by user %s; initiating job cleanup and removal" % \
             (args['signal'], args['user']), cobalt_log = True)
 
-        # set signal information so that the terminal state handler knows to write the delete record to the pbs log
+        # set signal information so that the terminal state handler knows to write the delete record
         self.__signaled_info = Signal_Info(Signal_Info.Reason.delete, args['signal'], args['user'])
 
         # start the resource epilogue scripts
@@ -1596,7 +1574,7 @@ class Job (StateMachine):
         self.__sm_log_info("user delete with signal %s requested by user %s; initiating job cleanup and removal" % \
             (args['signal'], args['user']), cobalt_log = True)
 
-        # set signal information so that the terminal state handler knows to write the delete record to the pbs log
+        # set signal information so that the terminal state handler knows to write the delete record
         self.__signaled_info = Signal_Info(Signal_Info.Reason.delete, args['signal'], args['user'])
 
         # start the resource epilogue scripts
@@ -1691,7 +1669,7 @@ class Job (StateMachine):
         self.acctlog.LogMessage("Job %s/%s on %s nodes done. %s exit:%s" % \
             (self.jobid, self.user, self.nodes, stats, str(self.exit_status)))
 
-        # create a pbs end-of-job record
+        # create a end-of-job record
         req_walltime_minutes = int(float(self.walltime)) % 60
         req_walltime_hours = int(float(self.walltime)) // 60
         
@@ -1700,52 +1678,33 @@ class Job (StateMachine):
         walltime_minutes = runtime % (60 * 60) // 60
         walltime_hours = runtime // (60 * 60)
         
-        optional_pbs_data = dict()
-        try:
-            optional_pbs_data['account'] = self.project # if job has an "account name" string
-        except KeyError:
-            pass
+        # group, session, exit_status are unknown
+        optional = {}
+        if self.project:
+            optional['account'] = self.project
+        accounting_logger.info(accounting.end(self.jobid, self.user,
+            "unknown", self.jobname, self.queue, self.ctime, self.qtime,
+            self.etime, self.start, self.exec_host,
+            {'ncpus':self.procs, 'nodect':self.nodes,
+                'walltime':timedelta(minutes=self.walltime)},
+            "unknown", self.end, "unknown",
+            {'walltime':
+                timedelta(seconds=self.__timers['user'].elapsed_time)}
+            **optional))
         
-        self.pbslog.log("E",
-            user = self.user, # the user name under which the job executed
-            #group = , # the group name under which the job executed
-            #account = , # if job has an "account name" string
-            jobname = self.jobname, # the name of the job
-            queue = self.queue, # the name of the queue in which the job executed
-            #resvname = , # the name of the resource reservation, if applicable
-            #resvID = , # the id of the resource reservation, if applicable
-            ctime = self.__timers['queue'].start_times[0], # time in seconds when job was created (first submitted)
-            qtime = self.__timers['current_queue'].start_times[0], # time in seconds when job was queued into current queue
-            etime = self.__get_etime(), # time in seconds when job became eligible to run
-            start = self.__timers['user'].start_times[0], # time in seconds when job execution started
-            exec_host = ":".join(self.location), # name of host on which the job is being executed
-            #Resource_List__dot__RES = , # limit for use of RES
-            Resource_List__dot__ncpus = self.procs, # max number of cpus
-            Resource_List__dot__nodect = self.nodes, # max number of nodes
-            Resource_List__dot__walltime = "%02d:%02d:00" % (req_walltime_hours, req_walltime_minutes),
-            #session = , # session number of job
-            #alt_id = , # optional alternate job identifier
-            end = self.__timers['user'].stop_times[-1], # time in seconds when job ended execution
-            #Exit_status = , # the exit status of the top process of the job
-            #resources_used__dot__RES = , # total RES used for job
-            resources_used__dot__walltime = "%02d:%02d:%02d" % (walltime_hours, walltime_minutes, walltime_seconds),
-            #accounting_id = , # CSA JID job id
-            mode = self.mode,
-            cwd = self.cwd,
-            exe = self.command,
-            args = " ".join(self.args),
-            **optional_pbs_data
-        )
-
         self.__sm_state = 'Terminal'
 
     def __sm_terminal(self, args):
-        if has_private_attr(self, '__signaled_info') and self.__signaled_info.reason == Signal_Info.Reason.delete:
-            self.pbslog.log("D",
-                requester = self.__signaled_info.user, # who deleted the job
-            )
-            logger.info('D;%s;%s' % (self.jobid, self.user))
-            self.acctlog.LogMessage('D;%s;%s' % (self.jobid, self.user))
+        try:
+            reason = self.__signaled_info.reason
+        except AttributeError:
+            return
+        else:
+            if reason == Signal_Info.Reason.delete:
+                accounting_logger.info(accounting.delete(self.jobid,
+                    self.__signaled_info.user))
+                logger.info('D;%s;%s' % (self.jobid, self.user))
+                self.acctlog.LogMessage('D;%s;%s' % (self.jobid, self.user))
 
     def __sm_get_state(self):
         return StateMachine._state.__get__(self)
@@ -1768,9 +1727,7 @@ class Job (StateMachine):
     def __set_queue(self, queue):
         logger.info('Q;%s;%s;%s' % (self.jobid, self.user, queue))
         self.acctlog.LogMessage('Q;%s;%s;%s' % (self.jobid, self.user, queue))
-        self.pbslog.log("Q",
-            queue = queue, # the queue into which the job was placed
-        )
+        self.accounting_logger(accounting.queue(self.jobid, queue))
         self.__timers['current_queue'] = Timer()
         self.__timers['current_queue'].start()
         self.__queue = queue
@@ -2003,7 +1960,7 @@ class JobList(DataList):
     def __init__(self, q):
         self.queue = q
         self.id_gen = cqm_id_gen
-        
+    
     def q_add (self, specs, callback = None, cargs = {}):
         for spec in specs:
             if "jobid" not in spec or spec['jobid'] == "*":
