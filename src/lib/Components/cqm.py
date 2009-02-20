@@ -122,7 +122,7 @@ def get_cqm_config(option, default):
 accounting_logdir = get_cqm_config("log_dir", Cobalt.DEFAULT_LOG_DIRECTORY)
 accounting_logger = logging.getLogger("cqm.accounting")
 accounting_logger.addHandler(
-    accounting.DatetimeFileHandler(accounting_logdir + "/%Y%m%d"))
+    accounting.DatetimeFileHandler(os.path.join(accounting_logdir, "%Y%m%d")))
 
 def has_private_attr(obj, attr):
     assert attr[0:2] == "__"
