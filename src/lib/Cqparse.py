@@ -39,10 +39,10 @@ CP.read(Cobalt.CONFIG_FILES)
 try:
     DEFAULT_LOG_DIRECTORY = CP.get('cqm', 'log_dir')
 except ConfigParser.NoOptionError:
-    DEFAULT_LOG_DIRECTORY = '/var/log/cobalt-accounting'
+    DEFAULT_LOG_DIRECTORY = Cobalt.DEFAULT_LOG_DIRECTORY
 
-# if os.path.exists( "/var/log/cobalt" ):
-#     DEFAULT_LOG_DIRECTORY = "/var/log/cobalt"
+# if os.path.exists( Cobalt.DEFAULT_LOG_DIRECTORY ):
+#     DEFAULT_LOG_DIRECTORY = Cobalt.DEFAULT_LOG_DIRECTORY
 # elif os.path.exists( os.path.join( os.path.curdir + "/logs" ) ):
 #     DEFAULT_LOG_DIRECTORY = os.path.join( os.path.curdir + "/logs" )
 # else:

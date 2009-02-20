@@ -84,6 +84,7 @@ import ConfigParser
 import sets
 import signal
 from threading import Thread
+from datetime import timedelta
 import traceback
 
 import Cobalt
@@ -98,13 +99,11 @@ from Cobalt.Exceptions import (QueueError, ComponentLookupError,
     DataStateError, DataStateTransitionError, StateMachineError,
     StateMachineIllegalEventError, StateMachineNonexistentEventError,
     JobProcessingError, JobPreemptionError)
-import accounting
+from Cobalt import accounting
 
 
 logger = logging.getLogger('cqm')
-accounting_logger = logging.getLogger("cqm.accounting")
-accounting_logger.addHandler(
-    accounting.DatetimeFileHandler("/var/log/cobalt/%Y%m%d"))
+
 cqm_id_gen = None
 
 config = ConfigParser.ConfigParser()
@@ -119,6 +118,11 @@ def get_cqm_config(option, default):
     except ConfigParser.NoOptionError:
         value = default
     return value
+
+accounting_logdir = get_cqm_config("log_dir", Cobalt.DEFAULT_LOG_DIRECTORY)
+accounting_logger = logging.getLogger("cqm.accounting")
+accounting_logger.addHandler(
+    accounting.DatetimeFileHandler(accounting_logdir + "/%Y%m%d"))
 
 def has_private_attr(obj, attr):
     assert attr[0:2] == "__"
@@ -1689,7 +1693,7 @@ class Job (StateMachine):
                 'walltime':timedelta(minutes=self.walltime)},
             "unknown", self.end, "unknown",
             {'walltime':
-                timedelta(seconds=self.__timers['user'].elapsed_time)}
+                timedelta(seconds=self.__timers['user'].elapsed_time)},
             **optional))
         
         self.__sm_state = 'Terminal'
@@ -1727,7 +1731,7 @@ class Job (StateMachine):
     def __set_queue(self, queue):
         logger.info('Q;%s;%s;%s' % (self.jobid, self.user, queue))
         self.acctlog.LogMessage('Q;%s;%s;%s' % (self.jobid, self.user, queue))
-        self.accounting_logger(accounting.queue(self.jobid, queue))
+        accounting_logger.info(accounting.queue(self.jobid, queue))
         self.__timers['current_queue'] = Timer()
         self.__timers['current_queue'].start()
         self.__queue = queue
@@ -1861,17 +1865,19 @@ class Job (StateMachine):
     dependencies = property(__get_dependencies)
 
     def __get_preempts(self):
-        return __preempts
+        return self.__preempts
 
     preempts = property(__get_preempts)
 
-    def __get_etime(self):
+    def __get_eligible_run_time(self):
         '''Return the time the job was first eligible to run'''
 
         try:
             return self.__timers['hold'].stop_times[-1] # job became eligible at end of last hold
         except KeyError:
             return self.__timers['queue'].start_times[0] # job has always been eligible to run
+
+    etime = property(__get_eligible_run_time)
 
     def __get_stats(self):
         '''Get job execution statistics from timers'''

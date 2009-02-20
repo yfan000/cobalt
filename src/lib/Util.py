@@ -260,7 +260,7 @@ class AccountingLog:
         try:
             self.logdir = CP.get('cqm', 'log_dir')
         except ConfigParser.NoOptionError:
-            self.logdir = '/var/log/cobalt-accounting'
+            self.logdir = Cobalt.DEFAULT_LOG_DIRECTORY
         self.date = None
         self.logfile = open('/dev/null', 'w+')
         self.name = name
