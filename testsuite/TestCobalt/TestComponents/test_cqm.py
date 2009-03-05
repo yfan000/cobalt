@@ -24,6 +24,7 @@ import ConfigParser
 from nose.tools import timed, TimeExpired
 import os
 import os.path
+import pwd
 import tempfile
 import time
 from threading import Lock, Condition
@@ -68,6 +69,14 @@ else:
 import TestCobalt.Utilities.WhiteBox
 from TestCobalt.Utilities.WhiteBox import whitebox
 TestCobalt.Utilities.WhiteBox.WHITEBOX_TESTING = WHITEBOX_TESTING
+
+# get name of user running the tests
+try:
+    uid = os.getuid()
+    username = pwd.getpwuid(uid).pw_name
+except:
+    username = "nobody"
+
 
 class TestCQMComponent (TestComponent):
     cqm_jobid = None
@@ -159,7 +168,7 @@ class TestCQMQueueManagement (TestCQMComponent):
         results = self.cqm.get_jobs([{'tag':"job", 'queue':"foo"}])
         assert len(results) == 0
         
-        self.cqm.del_queues([{'name':"empty"}])
+        r = self.cqm.del_queues([{'name':"empty"}])
         r = self.cqm.get_queues([{'name':"empty"}])
         assert len(r) == 0
         
@@ -753,7 +762,12 @@ class CQMIntegrationTestBase (TestCQMComponent):
         return op
 
     def job_get_state(self, get_spec = {}, assert_spec = {}, no_job_ok = False):
-        jobs = self.cqm.get_jobs([self.get_job_query_spec(get_spec)])
+        job_spec = {}
+        job_spec.update(get_spec)
+        for attr, val in assert_spec.iteritems():
+            if not job_spec.has_key(attr):
+                job_spec[attr] = "*"
+        jobs = self.cqm.get_jobs([self.get_job_query_spec(job_spec)])
         num_jobs = len(jobs)
         assert num_jobs < 2, "More than one job was returned"
         assert no_job_ok or num_jobs == 1, "Job %s not found in queue" % (self.jobid,)
@@ -770,9 +784,10 @@ class CQMIntegrationTestBase (TestCQMComponent):
         else:
             return False
 
-    def job_add(self, add_spec = {}, get_spec = {}):
-        job_name = traceback.extract_stack()[-2][2]
-        job_spec = {'queue':"default", 'user':"nobody", 'jobname':job_name, 'jobid':"*"}
+    def job_add(self, add_spec = {}, get_spec = {}, job_name = None):
+        if job_name == None:
+            job_name = traceback.extract_stack()[-2][2]
+        job_spec = {'queue':"default", 'user':username, 'jobname':job_name, 'jobid':"*"}
         job_spec.update(add_spec)
         for attr, val in self.default_job_spec.iteritems():
             if not job_spec.has_key(attr):
@@ -785,6 +800,18 @@ class CQMIntegrationTestBase (TestCQMComponent):
 
         self.job_get_state(get_spec, \
             assert_spec = {'is_active':False, 'is_runnable':True, 'has_completed':False, 'state':"queued"})
+
+    def job_update(self, spec, updates):
+        query_spec = {}
+        query_spec.update(spec)
+        for key, value in updates.iteritems():
+            if not query_spec.has_key(key):
+                query_spec[key] = "*"
+        jobs = self.cqm.set_jobs([self.get_job_query_spec(query_spec)], updates)
+        assert len(jobs) < 2, "More than one job was returned"
+        assert len(jobs) == 1, "Job %s not found in queue" % (self.jobid,)
+        self.job = jobs[0]
+        self.assert_jobid()
 
     def job_user_hold(self, orig_hold = "*", new_hold = True):
         jobs = self.cqm.set_jobs([self.get_job_query_spec({'user_hold':orig_hold})], {'user_hold':True})
@@ -846,8 +873,8 @@ class CQMIntegrationTestBase (TestCQMComponent):
         assert self.task.state == 'running'
         self.taskid = self.task.id
 
-    def job_preempt(self):
-        jobs = self.cqm.preempt_jobs([self.get_job_query_spec()])
+    def job_preempt(self, user = None, force = False):
+        jobs = self.cqm.preempt_jobs([self.get_job_query_spec()], user, force)
         assert len(jobs) < 2, "More than one job was returned"
         assert len(jobs) == 1, "Job %s not found in queue" % (self.jobid,)
         self.job = jobs[0]
@@ -959,9 +986,11 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_postscripts = create_wait_scripts(1, wait_script_timeout)
                 configs['job_postscripts'] = ":".join(get_script_filenames(self.job_postscripts))
                 syncs += self.job_postscripts
-                
+
+            test_name = traceback.extract_stack()[-2][2]
+            self.logger.debug("job_exec_info executing test '%s'" % (test_name,))
             cqm_config_file_update(configs)
-            self.job_add(add_spec)
+            self.job_add(add_spec, job_name = test_name)
             self.assert_job_state("queued")
             if job_queued != None:
                 debug_print("JOB_EXEC: job_queued")
@@ -1223,9 +1252,20 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_preempt()
                 assert False, "attempt to preempt while in the queued state should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobPreemptionError.fault_code
             self.job_get_state(assert_spec = {'state':'queued'})
         self.job_exec_driver(job_queued = _job_queued)
+
+    @timeout(10)
+    def test_nonpreempt_queued__walltime_adjustment(self):
+        # change the walltime of a queued job
+        def _job_queued():
+            self.job_update({}, {'walltime':new_walltime})
+            assert self.job['walltime'] == new_walltime
+        def _task_active():
+            self.job_get_state(assert_spec = {'walltime':new_walltime})
+        new_walltime = 903245832
+        self.job_exec_driver(job_queued = _job_queued, task_active = _task_active)
 
     @timeout(10)
     def test_nonpreempt_hold_both(self):
@@ -1305,16 +1345,33 @@ class CQMIntegrationTestBase (TestCQMComponent):
     @timeout(10)
     def test_nonpreempt_hold__preempt(self):
         # the job is in the hold state; attempts to preempt the job should fail
-        cqm_config_file_update({})
-        self.job_add()
-        self.assert_job_state("queued")
-        try:
-            self.job_preempt()
-            assert False, "attempt to preempt while in a hold state should fail"
-        except xmlrpclib.Fault, e:
-            assert e.faultCode == StateMachineIllegalEventError.fault_code
-        self.job_kill()
-        self.assert_job_state("done")
+        def _job_queued():
+            self.assert_job_state("queued")
+            self.job_user_hold()
+            self.assert_job_state("user_hold")
+            try:
+                self.job_preempt()
+                assert False, "attempt to preempt while in a hold state should fail"
+            except xmlrpclib.Fault, e:
+                assert e.faultCode == JobPreemptionError.fault_code
+            self.job_kill()
+            self.assert_job_state("done")
+        self.job_exec_driver(job_queued = _job_queued, exec_task = False)
+
+    @timeout(10)
+    def test_nonpreempt_hold__walltime_adjustment(self):
+        # change the walltime of a queued job
+        def _job_queued():
+            self.assert_job_state("queued")
+            self.job_user_hold()
+            self.assert_job_state("user_hold")
+            self.job_update({}, {'walltime':new_walltime})
+            assert self.job['walltime'] == new_walltime
+            self.job_user_release()
+        def _task_active():
+            self.job_get_state(assert_spec = {'walltime':new_walltime})
+        new_walltime = 903245832
+        self.job_exec_driver(job_queued = _job_queued, task_active = _task_active)
 
     @timeout(10)
     def test_nonpreempt_starting__hold(self):
@@ -1375,6 +1432,24 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 assert e.faultCode == JobPreemptionError.fault_code
         self.job_exec_driver(job_pretask = _pretask)
         self.job_exec_driver(resource_pretask = _pretask)
+
+    @timeout(130)
+    def test_nonpreempt_starting__walltime_adjustment(self):
+        # the job is starting; let's adjust its walltime
+        def _pretask():
+            self.job_update({}, {'walltime':new_walltime})
+            assert self.job['walltime'] == new_walltime
+        def _task_active():
+            op = self.assert_next_task_op('signal')
+            self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Killing"})
+            assert op[3] == Signal_Map.terminate
+        orig_walltime = 1
+        new_walltime = 2
+        timer = Timer()
+        timer.start()
+        self.job_exec_driver(spec = {'walltime':orig_walltime}, job_pretask = _pretask, task_active = _task_active)
+        timer.stop()
+        assert timer.elapsed_time > new_walltime * 60 - 5
 
     @timeout(10)
     def test_nonpreempt_running__hold(self):
@@ -1502,6 +1577,23 @@ class CQMIntegrationTestBase (TestCQMComponent):
             self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Killing"})
             assert op[3] == Signal_Map.terminate
         self.job_exec_driver(spec = {'walltime':1}, task_active = _task_active)
+
+    @timeout(130)
+    def test_nonpreempt_running__walltime_adjustment(self):
+        # a task is running; let's adjust its walltime
+        def _task_active():
+            self.job_update({}, {'walltime':new_walltime})
+            assert self.job['walltime'] == new_walltime
+            op = self.assert_next_task_op('signal')
+            self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Killing"})
+            assert op[3] == Signal_Map.terminate
+        orig_walltime = 1
+        new_walltime = 2
+        timer = Timer()
+        timer.start()
+        self.job_exec_driver(spec = {'walltime':orig_walltime}, task_active = _task_active)
+        timer.stop()
+        assert timer.elapsed_time > new_walltime * 60 - 5
 
     @whitebox
     @timeout(10)
@@ -1968,7 +2060,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_preempt()
                 assert False, "attempt to preempt while in a hold state should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobPreemptionError.fault_code
         self.job_exec_driver(num_preempts = 1, job_queued = _job_queued)
 
     @timeout(10)
@@ -1980,7 +2072,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_preempt()
                 assert False, "attempt to preempt while in a hold state should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobPreemptionError.fault_code
             self.job_user_release(new_hold = False)
         self.job_exec_driver(num_preempts = 1, job_queued = _job_queued)
 
@@ -2146,6 +2238,29 @@ class CQMIntegrationTestBase (TestCQMComponent):
         del self.test_preempt_count
         del self.test_task_count
 
+    @timeout(10)
+    def test_preempt_running__preempt_forced(self):
+        def _task_active():
+            self.assert_job_state("running")
+            self.test_task_count += 1
+        def _job_preempt():
+            self.job_preempt(user=username, force=True)
+            self.assert_next_task_op('signal')
+        def _job_preempted():
+            self.assert_job_state("preempted")
+            self.test_preempt_count += 1
+        num_preempts = 1
+        self.test_preempt_count = 0
+        self.test_task_count = 0
+        self.job_exec_driver(num_preempts = num_preempts, spec = {'mintasktime':1, 'walltime':num_preempts + 1},
+            task_active = _task_active, job_preempt = _job_preempt, job_preempted = _job_preempted)
+        assert self.test_preempt_count == num_preempts, "number of preempts should have been %d, but was %d instead" % \
+            (num_preempts, self.test_preempt_count,)
+        assert self.test_task_count == num_preempts + 1, "tasks executed should have been %d, but %d were executed instead" % \
+            (num_preempts + 1, self.test_task_count,)
+        del self.test_preempt_count
+        del self.test_task_count
+
     @timeout(130)
     def test_preempt_running__preempt_mintasktime(self):
         def _task_active():
@@ -2201,6 +2316,9 @@ class CQMIntegrationTestBase (TestCQMComponent):
 
     @timeout(190)
     def test_preempt_running__maxtasktime_force_kill(self):
+        def _task_active():
+            self.assert_job_state("running")
+            self.test_task_count += 1
         def _job_preempt():
             # preemption will be started when the task checkpoint timer expires, so we don't want job_preempt to be called here
             op = self.assert_next_task_op('signal')
@@ -2209,20 +2327,23 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert op[3] == Signal_Map.terminate
             op = self.assert_next_task_op('signal')
             assert op[3] == Signal_Map.force_kill
-            self.task_finished(0)
-            self.assert_next_task_op('wait')
-            return False
-        def _job_preempted():
-            self.job_kill()
-            return False
+            self.test_preempt_count += 1
         num_preempts = 1
+        self.test_preempt_count = 0
+        self.test_task_count = 0
         timer = Timer()
         timer.start()
         self.job_exec_driver(num_preempts = num_preempts, spec = {'maxcptime':1, 'maxtasktime':2, 'force_kill_delay':1,
-           'walltime':num_preempts * 4}, job_preempt = _job_preempt, job_preempted = _job_preempted)
+           'walltime':num_preempts * 4}, task_active = _task_active, job_preempt = _job_preempt)
         timer.stop()
         assert timer.elapsed_time > num_preempts * 60 - 5, "timer expected to be greater than %f but was %f" % \
             (num_preempts * 180 - 5, timer.elapsed_time)
+        assert self.test_preempt_count == num_preempts, "number of preempts should have been %d, but was %d instead" % \
+            (num_preempts, self.test_preempt_count,)
+        assert self.test_task_count == num_preempts + 1, "tasks executed should have been %d, but %d were executed instead" % \
+            (num_preempts + 1, self.test_task_count,)
+        del self.test_preempt_count
+        del self.test_task_count
 
     @timeout(130)
     def test_preempt_running__maxtasktime_nowalltime(self):
@@ -2896,6 +3017,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
             resource_posttask = _resource_posttask, job_posttask = _job_posttask)
         
 class TestCQMSystemIntegration (CQMIntegrationTestBase):
+    logger = setup_file_logging("TestCQMSystemIntegration", LOG_FILE, "DEBUG")
     default_job_spec = {'mode':"vn", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096}
 
     def setup(self):
@@ -2910,6 +3032,7 @@ class TestCQMSystemIntegration (CQMIntegrationTestBase):
         CQMIntegrationTestBase.teardown(self)
 
 class TestCQMSciptIntegration (CQMIntegrationTestBase):
+    logger = setup_file_logging("TestCQMScriptIntegration", LOG_FILE, "DEBUG")
     default_job_spec = {'mode':"script", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096}
 
     def setup(self):

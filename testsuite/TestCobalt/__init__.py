@@ -15,7 +15,7 @@ bgkernel: false
 log_dir: /tmp
 
 [bgsched]
-utility_file: /tmp/asdf
+utility_file: /dev/null
 """)
 fp.close()
 

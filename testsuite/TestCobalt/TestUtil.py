@@ -32,8 +32,13 @@ class TestTimers (object):
     def test_countdown_timer(self):
         sleep_time = 1
         t = Timer(1.5 * sleep_time)
+        assert t.max_time == 1.5 * sleep_time
         t.start()
         time.sleep(sleep_time)
+        assert not t.has_expired
+        time.sleep(sleep_time)
+        assert t.has_expired
+        t.max_time = 3.0 * sleep_time
         assert not t.has_expired
         time.sleep(sleep_time)
         assert t.has_expired
