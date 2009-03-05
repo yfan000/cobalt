@@ -112,7 +112,8 @@ if __name__ == '__main__':
         print "The most recent scheduling attempt reports:\n"
         cqm = ComponentProxy("queue-manager", defer=False)
         sched = ComponentProxy("scheduler", defer=False)
-        jobs = cqm.get_jobs([{'jobid':"*", 'queue':"*", 'system_state':"*", 'user_state':"*", 'dependencies':"*"}])
+        jobs = cqm.get_jobs([{'jobid':"*", 'queue':"*", 'is_active':"*", 'has_completed':False, 'user_hold':"*", 'admin_hold':"*",
+                              'dependencies':"*"}])
         queues = cqm.get_queues([{'name':"*", 'state':"*"}])
         sched_info = sched.get_sched_info()
         
@@ -123,9 +124,12 @@ if __name__ == '__main__':
                 
             print "job", job['jobid'], ":"
             print "    ",
-            if job['system_state'] == 'running':
-                print "the job is running"
-            elif job['system_state'] == 'hold' or job['user_state'] == 'hold':
+            if job['is_active']:
+                hold_msg = ""
+                if job['admin_hold'] == True or job['user_hold'] == True:
+                    hold_msg = " (hold pending)"
+                print "the job is running%s" % (hold_msg,)
+            elif job['admin_hold'] == True or job['user_hold'] == True:
                 print "the job has a hold on it"
             elif job['dependencies']:
                 print "the job has dependencies:", job['dependencies']
@@ -238,7 +242,7 @@ if __name__ == '__main__':
         # calculate derived values
         for j in response:
             # walltime
-            t = int(j['walltime'].split('.')[0])
+            t = int(float(j['walltime']))
             h = int(math.floor(t/60))
             t -= (h * 60)
             j['walltime'] = "%02d:%02d:00" % (h, t)
