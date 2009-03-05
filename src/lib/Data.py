@@ -78,7 +78,8 @@ class Data (object):
     fields -- list of public data fields for the entity
     inherent -- a list of fields that cannot be included in the spec
     required -- a list of fields required in the spec
-    
+    explicit -- fields that are only returned when explicitly listed in the spec
+
     Attributes:
     tag -- Misc. label.
     
@@ -91,7 +92,8 @@ class Data (object):
     fields = ["tag"]
     inherent = []
     required = []
-    
+    explicit = []
+
     def __init__ (self, spec):
         
         """Initialize a Data item.
@@ -125,12 +127,11 @@ class Data (object):
         """Return a transmittable version of an entity.
         
         Arguments:
-        fields -- List of fields to include. (default self.fields.keys())
+        fields -- List of fields to include. (default self.fields.keys() - self.explicit.keys())
         """
         if fields is None:
-            fields = self.fields
+            fields = [field for field in self.fields if field not in self.explicit]
         return dict([(field, getattr(self, field, None)) for field in fields])
-        # return dict([(field, getattr(self, field, None)) for field in fields if hasattr(self, field)])
     
     def update (self, spec):
         """Update the values of multiple fields on an entity.
