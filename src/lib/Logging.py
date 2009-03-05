@@ -13,6 +13,19 @@ import sys
 import termios
 import types
 import linecache
+import Cobalt
+import ConfigParser
+
+config = ConfigParser.ConfigParser()
+config.read(Cobalt.CONFIG_FILES)
+try:
+    SYSLOG_LOCATION = config.get('logger', 'syslog_location')
+except (ConfigParser.NoOptionError, ConfigParser.NoSectionError):
+    SYSLOG_LOCATION = "/dev/log"
+try:
+    SYSLOG_FACILITY = config.get('logger', 'syslog_facility')
+except (ConfigParser.NoOptionError, ConfigParser.NoSectionError):
+    SYSLOG_FACILITY = "local0"
 
 def print_attributes(attrib):
     ''' Add the attributes for an element'''
@@ -135,7 +148,7 @@ class FragmentingSysLogHandler(logging.handlers.SysLogHandler):
                     self.socket.send("Reconnected to syslog")
                     self.socket.send(msg)
 
-def setup_logging(procname, to_console=True, to_syslog=True, syslog_facility='local0', level=0):
+def setup_logging(procname, to_console=True, to_syslog=True, syslog_facility=SYSLOG_FACILITY, level=0):
     '''setup logging for bcfg2 software'''
     if hasattr(logging, 'already_setup'):
         return 
@@ -144,7 +157,7 @@ def setup_logging(procname, to_console=True, to_syslog=True, syslog_facility='lo
         log_to_stderr(logging.root, level=level)
     if to_syslog:
         try:
-            syslog = FragmentingSysLogHandler(procname, '/dev/log', syslog_facility)
+            syslog = FragmentingSysLogHandler(procname, SYSLOG_LOCATION, syslog_facility)
             syslog.setLevel(logging.DEBUG)
             syslog.setFormatter(logging.Formatter('%(name)s[%(process)d]: %(message)s'))
             logging.root.addHandler(syslog)
