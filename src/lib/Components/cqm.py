@@ -7,10 +7,6 @@ __revision__ = '$Revision$'
 #
 # TODO:
 #
-# - add cobalt log output to __sm_log routines
-#
-# - add __sm_log_exception and __sm_log_debug
-#
 # - modify progress routine to catch exceptions and report them using __sm_log_exception.  should some or all exceptions cause
 #   the job to be terminated?
 #
@@ -74,6 +70,7 @@ __revision__ = '$Revision$'
 
 DEFAULT_FORCE_KILL_DELAY = 5  # (in minutes)
 
+import errno
 import logging
 import os
 import pwd
@@ -441,7 +438,7 @@ class Job (StateMachine):
         self.endtime = spec.get("endtime", "-1")
         self.type = spec.get("type", "mpish")
         self.user = spec.get("user")
-        self.walltime = spec.get("walltime", 0)
+        self.__walltime = int(float(spec.get("walltime", 0)))
         self.procs = spec.get("procs")
         self.nodes = spec.get("nodes")
         self.cwd = spec.get("cwd")
@@ -489,9 +486,9 @@ class Job (StateMachine):
         self.preemptable = spec.get("preemptable", False)
         self.__preempts = 0
         if self.preemptable:
-            self.mintasktime = spec.get("mintasktime", 0)
-            self.maxtasktime = spec.get("maxtasktime", 0)
-            self.maxcptime = spec.get("maxcptime", 0)
+            self.mintasktime = int(float(spec.get("mintasktime", 0)))
+            self.maxtasktime = int(float(spec.get("maxtasktime", 0)))
+            self.maxcptime = int(float(spec.get("maxcptime", 0)))
 
         self.taskid = None
         self.task_running = False
@@ -689,6 +686,8 @@ class Job (StateMachine):
         else:
             event_msg = ""
         logger.debug("Job %s/%s: State=%s%s; %s" % (self.jobid, self.user, self.__sm_state, event_msg, msg))
+        if cobalt_log:
+            self.__write_cobalt_log("Debug: %s" % (msg,))
 
     def __sm_log_info(self, msg, cobalt_log = False):
         '''write an informational message to the CQM log that includes state machine status'''
@@ -697,6 +696,8 @@ class Job (StateMachine):
         else:
             event_msg = ""
         logger.info("Job %s/%s: State=%s%s; %s" % (self.jobid, self.user, self.__sm_state, event_msg, msg))
+        if cobalt_log:
+            self.__write_cobalt_log("Info: %s" % (msg,))
 
     def __sm_log_warn(self, msg, cobalt_log = False):
         '''write a warning message to the CQM log that includes state machine status'''
@@ -705,6 +706,8 @@ class Job (StateMachine):
         else:
             event_msg = ""
         logger.warning("Job %s/%s: State=%s%s; %s" % (self.jobid, self.user, self.__sm_state, event_msg, msg))
+        if cobalt_log:
+            self.__write_cobalt_log("Warning: %s" % (msg,))
 
     def __sm_log_error(self, msg, tb_flag = True, skip_tb_entries = 1, cobalt_log = False):
         '''write an error message to the CQM log that includes state machine status and a stack trace'''
@@ -719,6 +722,8 @@ class Job (StateMachine):
             for entry in stack[:last_tb_entry]:
                 full_msg += "\n    " + entry[:-1]
         logger.error(full_msg)
+        if cobalt_log:
+            self.__write_cobalt_log("ERROR: %s" % (msg,))
 
     def __sm_log_exception(self, msg, cobalt_log = False):
         '''write an error message to the CQM log that includes state machine status and a stack trace'''
@@ -734,6 +739,8 @@ class Job (StateMachine):
         for entry in stack:
             full_msg += "\n    " + entry[:-1]
         logger.error(full_msg)
+        if cobalt_log:
+            self.__write_cobalt_log("EXCEPTION: %s" % (fullmsg,))
 
     def __sm_raise_exception(self, msg, cobalt_log = False):
         self.__sm_log_error(msg, skip_tb_entries = 2, cobalt_log = cobalt_log)
@@ -908,6 +915,8 @@ class Job (StateMachine):
 
     def __sm_common_hold__release(self, args, queued_state):
         '''release a hold previous placed on a job in a hold state'''
+        activity = False
+
         if args['type'] == 'admin':
             if self.__admin_hold:
                 self.__admin_hold = False
@@ -1121,13 +1130,23 @@ class Job (StateMachine):
             self.__sm_log_info("user delete request already pending; ignoring preemption request", cobalt_log = True)
             return
 
-        self.__sm_log_info("preemption request now pending", cobalt_log = True)
+        # if preemption is being forced, reset the time limit on the minimum task timer so that the preemption request will be
+        # processed the next time a progress event is triggered
+        if args.has_key('force'):
+            self.__mintasktimer.max_time = 0
         if self.maxcptime > 0:
             self.__signaling_info = Signal_Info(Signal_Info.Reason.preempt, Signal_Map.checkpoint, None, True)
         else:
             self.__signaling_info = Signal_Info(Signal_Info.Reason.preempt, Signal_Map.terminate, None, True)
         if args.has_key('user'):
             self.__signaling_info.user = args['user']
+        if args.has_key('force'):
+            user_msg = ""
+            if args.has_key('user'):
+                user_msg = " by user %s" % (args['user'],)
+            self.__sm_log_info("preemption forced%s" % (user_msg,), cobalt_log = True)
+        else:
+            self.__sm_log_info("preemption request now pending", cobalt_log = True)
     
     def __sm_prologue__progress(self, args):
         '''
@@ -1674,8 +1693,8 @@ class Job (StateMachine):
             (self.jobid, self.user, self.nodes, stats, str(self.exit_status)))
 
         # create a end-of-job record
-        req_walltime_minutes = int(float(self.walltime)) % 60
-        req_walltime_hours = int(float(self.walltime)) // 60
+        req_walltime_minutes = self.walltime % 60
+        req_walltime_hours = self.walltime // 60
         
         runtime = int(self.__timers['user'].elapsed_time)
         walltime_seconds = runtime % 60
@@ -1690,7 +1709,7 @@ class Job (StateMachine):
             "unknown", self.jobname, self.queue, self.ctime, self.qtime,
             self.etime, self.start, self.exec_host,
             {'ncpus':self.procs, 'nodect':self.nodes,
-                'walltime':timedelta(minutes=self.walltime)},
+                'walltime':timedelta(minutes=int(self.walltime))},
             "unknown", self.end, "unknown",
             {'walltime':
                 timedelta(seconds=self.__timers['user'].elapsed_time)},
@@ -1737,6 +1756,39 @@ class Job (StateMachine):
         self.__queue = queue
 
     queue = property(__get_queue, __set_queue)
+
+    def __get_walltime(self):
+        return self.__walltime
+
+    def __set_walltime(self, walltime):
+        # if this is a script mode job, and the job has resources, then the partition reservation needs to be adjusted
+        #
+        # FIXME: this would require a retry sequence (thread unlock, sleep, thread relock) if contacting the script manager
+        # failed.  since the script manager will be integrated into the system component, the code below won't be necessary and
+        # thus is ignored for the moment.
+        #
+        # FIXME: does the system component need to be informed of walltime changes???
+        #
+        # if self.mode == 'script' and not self.preemptable and not self.maxtasktime:
+        #     try:
+        #         self.__sm_log_info("instructing the system component to reserve the partition for the duration of the task")
+        #         ComponentProxy("system").reserve_partition_until(self.location[0], time.time() + 60*float(walltime))
+        #     except (ComponentLookupError, xmlrpclib.Fault), e:
+        #         self.__sm_log_warn("failed to reserve the partition for the user's script (%s); retry pending" % (e,))
+        # 
+        #     except:
+        #         self.__sm_raise_exception("unexpected error returned from the system component when attempting to reserve " + \
+        #             "the partition")
+        #         return Job.__rc_unknown
+        #
+        self.__walltime = int(float(walltime))
+        try:
+            self.__max_job_timer.max_time = walltime * 60
+        except AttributeError:
+            pass
+        self.__sm_log_info("walltime adjusted to %d minutes" % (self.__walltime,))
+
+    walltime = property(__get_walltime, __set_walltime)
 
     def __get_admin_hold(self):
         return self.__admin_hold
@@ -1890,15 +1942,26 @@ class Job (StateMachine):
         return result
 
     def __write_cobalt_log(self, message):
-        uid = pwd.getpwnam(self.user)[2]
+        try:
+            uid = pwd.getpwnam(self.user)[2]
+        except KeyError:
+            logger.error("Job %s/%s: user name is not valid; skipping output to cobaltlog file" % (self.jobid, self.user))
+            return
+        except Exception, e:
+            logger.exception("Job %s/%s: obtaining the user id failed" % (self.jobid, self.user))
+            return
+
         try:
             file_uid = os.stat(self.cobalt_log_file).st_uid
-        except:
-             logger.error("Job %s/%s: cannot stat cobaltlog file %s" % (self.jobid, self.user, self.cobalt_log_file))
-             return
-             
-        if file_uid != uid:
-            logger.error("Job %s/%s: user does not own cobaltlog file %s" % (self.jobid, self.user, self.cobalt_log_file))
+            if file_uid != uid:
+                logger.error("Job %s/%s: user does not own cobaltlog file %s" % (self.jobid, self.user, self.cobalt_log_file))
+                return
+        except OSError, e:
+            if e.errno != errno.ENOENT:
+                logger.error("Job %s/%s: cannot stat cobaltlog file %s" % (self.jobid, self.user, self.cobalt_log_file))
+                return
+        except Exception, e:
+            logger.exception("Job %s/%s: stat of cobaltlog file %s failed" % (self.jobid, self.user, self.cobalt_log_file))
             return
         
         try:    
@@ -1917,19 +1980,24 @@ class Job (StateMachine):
         #     self.__sm_log_exception(None, "Job %s/%s: an exception occurred during a progress event" % (self.jobid, self.user))
 
     def run(self, nodelist):
-            self.trigger_event("Run", {'nodelist' : nodelist})
+        self.trigger_event("Run", {'nodelist' : nodelist})
         # try:
         #     self.trigger_event("Run", {'nodelist' : nodelist})
         # except:
         #     self.__sm_log_exception(None, "Job %s/%s: an exception occurred while attempting to start the task" % \
         #         (self.jobid, self.user))
 
-    def preempt(self, user = None):
+    def preempt(self, user = None, force = False):
         '''process a preemption request for a job'''
         args = {}
         if user is not None:
             args['user'] = user
-        self.trigger_event('Preempt', args)
+        if force:
+            args['force'] = True
+        try:
+            self.trigger_event('Preempt', args)
+        except StateMachineIllegalEventError:
+            raise JobPreemptionError("jobs in the '%s' state may not be preempted" % (self.state,), self.jobid)
 
     def kill(self, user = None, signame = Signal_Map.terminate, force = False):
         '''process a user delete request for a job'''
@@ -2113,11 +2181,9 @@ class Queue (Data):
        self is a Queue object (with restrictions and stuff)
        self.data is a list of Job objects'''
     
-    fields = Data.fields + [
-        "cron", "name", "state", "adminemail",
-        "policy", "maxuserjobs",
-    ] + [attr for attr in Restriction.__checks__]
-    
+    fields = Data.fields + ["cron", "name", "state", "adminemail", "policy", "maxuserjobs",] + Restriction.__checks__.keys()
+    explicit = Restriction.__checks__.keys()
+
     def __init__(self, spec):
         Data.__init__(self, spec)
         self.cron = spec.get("cron")
@@ -2241,8 +2307,12 @@ class QueueDict(DataDict):
 
 class QueueManager(Component):
     '''Cobalt Queue Manager'''
+
     implementation = 'cqm'
     name = 'queue-manager'
+
+    logger = logger
+
     __statefields__ = ['Queues']
     
     def __init__(self, *args, **kwargs):
@@ -2432,10 +2502,10 @@ class QueueManager(Component):
         return self.Queues.get_jobs(specs, _run_jobs, nodelist)
     run_jobs = exposed(query(run_jobs))
 
-    def preempt_jobs(self, specs, user = None):
-        def _preempt_jobs(job, user):
-            job.preempt(user)
-        return self.Queues.get_jobs(specs, _preempt_jobs, user)
+    def preempt_jobs(self, specs, user = None, force = False):
+        def _preempt_jobs(job, args):
+            job.preempt(user, force)
+        return self.Queues.get_jobs(specs, _preempt_jobs)
     preempt_jobs = exposed(query(preempt_jobs))
 
     def del_jobs(self, specs, force = False, user = None, signame = Signal_Map.terminate):
@@ -2498,7 +2568,8 @@ class QueueManager(Component):
             if len(jobs) > 0:
                 failed.append(queue.name)
                 queues.remove(queue)
-        response = self.Queues.del_queues([queue.to_rx() for queue in queues])
+        if len(queues) > 0:
+            response = self.Queues.del_queues([queue.to_rx() for queue in queues])
         if failed:
             raise QueueError, ("The %s queue(s) contains jobs. Either move the jobs to another queue, or \n" + \
                 "use 'cqadm -f --delq' to delete the queue(s) and the jobs.\n\nDeleted Queues\n================\n%s") % \
