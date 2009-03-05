@@ -52,7 +52,7 @@ class JobValidationError(Exception):
 class JobProcessingError (Exception):
     fault_code = fault_code_counter.next()
     def __init__(self, msg, jobid, user, state, event):
-        self.args = (msg, jobid, user)
+        self.args = (msg, jobid, user, state, event)
         self.msg = msg
         self.jobid = jobid
         self.user = user
@@ -62,7 +62,7 @@ class JobProcessingError (Exception):
 class JobPreemptionError (Exception):
     fault_code = fault_code_counter.next()
     def __init__(self, msg, jobid):
-        self.args = (jobid, msg)
+        self.args = (msg, jobid)
         self.msg = msg
         self.jobid = jobid
 
