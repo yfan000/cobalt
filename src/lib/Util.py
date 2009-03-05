@@ -374,6 +374,16 @@ class Timer (object):
 
     elapsed_time = property(__get_elapsed_time, doc = "time elapsed while the has been active, including any current activity")
 
+    def __get_max_time(self):
+        return self.__max_time
+
+    def __set_max_time(self, max_time):
+        if max_time != None and max_time < 0:
+            raise TimerException, "maximum time may not be negative (max_time=%s)" % (max_time,)
+        self.__max_time = max_time
+
+    max_time = property(__get_max_time, __set_max_time)
+
     def __get_has_expired(self):
         '''determine if the timer has expired'''
         if self.__max_time != None:
