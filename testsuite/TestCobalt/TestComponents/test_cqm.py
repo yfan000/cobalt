@@ -568,9 +568,6 @@ class BogusException1 (Exception):
 class BogusException2 (Exception):
     fault_code = Cobalt.Exceptions.fault_code_counter.next()
 
-class ThreadSafeQueueManager (QueueManager):
-    __metaclass__ = ThreadSafetyMetaClass
-
 def cqm_config_file_update(options = {}):
     config_file = Cobalt.CONFIG_FILES[0]
     config_fp = open(config_file, "w")
@@ -697,7 +694,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
         self.slp = TimingServiceLocator()
 
     def setup_cqm(self):
-        self.qm = ThreadSafeQueueManager()
+        self.qm = QueueManager()
         self.qm_thr = ComponentProgressThread(self.qm)
         self.qm_thr.start()
         try:
@@ -3016,32 +3013,59 @@ class CQMIntegrationTestBase (TestCQMComponent):
             preempt_posttask = _preempt_posttask, job_preempted = _job_preempted, preempt_pretask = _preempt_pretask,
             resource_posttask = _resource_posttask, job_posttask = _job_posttask)
         
+
 class TestCQMSystemIntegration (CQMIntegrationTestBase):
     logger = setup_file_logging("TestCQMSystemIntegration", LOG_FILE, "DEBUG")
-    default_job_spec = {'mode':"vn", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096}
+    default_job_spec = {'mode':"vn", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096, 'outputdir':"."}
 
     def setup(self):
         CQMIntegrationTestBase.setup(self)
         self.taskman = SimulatedSystem()
-        self.scriptm = SimulatedScriptManager()
         self.setup_cqm()
 
     def teardown(self):
         del self.taskman
-        del self.scriptm
         CQMIntegrationTestBase.teardown(self)
 
-class TestCQMSciptIntegration (CQMIntegrationTestBase):
+class TestCQMScriptIntegration (CQMIntegrationTestBase):
     logger = setup_file_logging("TestCQMScriptIntegration", LOG_FILE, "DEBUG")
-    default_job_spec = {'mode':"script", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096}
+    default_job_spec = {'mode':"script", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096, 'outputdir':"."}
 
     def setup(self):
         CQMIntegrationTestBase.setup(self)
-        self.taskman = SimulatedScriptManager()
-        self.system = SimulatedSystem()
+        self.taskman = SimulatedSystem()
         self.setup_cqm()
-        
+
     def teardown(self):
         del self.taskman
-        del self.system
         CQMIntegrationTestBase.teardown(self)
+
+# class TestCQMSystemIntegration (CQMIntegrationTestBase):
+#     logger = setup_file_logging("TestCQMSystemIntegration", LOG_FILE, "DEBUG")
+#     default_job_spec = {'mode':"vn", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096}
+# 
+#     def setup(self):
+#         CQMIntegrationTestBase.setup(self)
+#         self.taskman = SimulatedSystem()
+#         self.scriptm = SimulatedScriptManager()
+#         self.setup_cqm()
+# 
+#     def teardown(self):
+#         del self.taskman
+#         del self.scriptm
+#         CQMIntegrationTestBase.teardown(self)
+
+# class TestCQMScriptIntegration (CQMIntegrationTestBase):
+#     logger = setup_file_logging("TestCQMScriptIntegration", LOG_FILE, "DEBUG")
+#     default_job_spec = {'mode':"script", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096}
+# 
+#     def setup(self):
+#         CQMIntegrationTestBase.setup(self)
+#         self.taskman = SimulatedScriptManager()
+#         self.system = SimulatedSystem()
+#         self.setup_cqm()
+#         
+#     def teardown(self):
+#         del self.taskman
+#         del self.system
+#         CQMIntegrationTestBase.teardown(self)

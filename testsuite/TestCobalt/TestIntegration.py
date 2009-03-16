@@ -8,6 +8,7 @@ import logging
 # import Cobalt
 # Cobalt.CONFIG_FILES = ()
 
+import TestCobalt
 from Cobalt.Components.slp import TimingServiceLocator
 from Cobalt.Components.cqm import QueueManager
 from Cobalt.Components.simulator import Simulator
@@ -17,25 +18,25 @@ import Cobalt.Proxy
 from Cobalt.Exceptions import ComponentLookupError
 from TestCobalt.Utilities.ThreadSupport import *
 
-class TSQueueManager (QueueManager):
-    __metaclass__ = ThreadSafetyMetaClass
-
-class TSSimulator (Simulator):
-    __metaclass__ = ThreadSafetyMetaClass
-
-class TSScriptManager (ScriptManager):
-    __metaclass__ = ThreadSafetyMetaClass
+# class TSQueueManager (QueueManager):
+#     __metaclass__ = ThreadSafeComponent
+# 
+# class TSSimulator (Simulator):
+#     __metaclass__ = ThreadSafeComponent
+# 
+# class TSScriptManager (ScriptManager):
+#     __metaclass__ = ThreadSafeComponent
 
 class TestIntegration (object):
     def setup (self):
         self.slp = TimingServiceLocator()
-        self.system = TSSimulator(config_file="simulator.xml")
+        self.system = Simulator(config_file="simulator.xml")
         self.system_thr = ComponentProgressThread(self.system)
         self.system_thr.start()
-        self.scriptm = TSScriptManager()
+        self.scriptm = ScriptManager()
         self.scriptm_thr = ComponentProgressThread(self.scriptm)
         self.scriptm_thr.start()
-        self.qm = TSQueueManager()
+        self.qm = QueueManager()
         self.qm_thr = ComponentProgressThread(self.qm)
         self.qm_thr.start()
         
@@ -97,9 +98,9 @@ class TestIntegration (object):
 
         job = jobs[0]
         jobid = job['jobid']
-        job_location_args = [{'jobid':jobid, 'nodes':job['nodes'], 'queue':job['queue'], 'utility_score':1,
+        job_location_args = [{'jobid':jobid, 'nodes':job['nodes'], 'queue':job['queue'], 'utility_score':1, 'threshold': 1,
             'walltime':job['walltime']}]
-        locations = simulator.find_job_location(job_location_args, 0, 3600)
+        locations = simulator.find_job_location(job_location_args, 3600)
         assert locations.has_key(jobid)
 
         location = locations[jobid]
@@ -136,9 +137,9 @@ class TestIntegration (object):
 
         job = jobs[0]
         jobid = job['jobid']
-        job_location_args = [{'jobid':jobid, 'nodes': job['nodes'], 'queue': job['queue'], 'utility_score': 1,
+        job_location_args = [{'jobid':jobid, 'nodes': job['nodes'], 'queue': job['queue'], 'utility_score': 1, 'threshold': 1,
             'walltime': job['walltime']}]
-        locations = simulator.find_job_location(job_location_args, 0, 3600)
+        locations = simulator.find_job_location(job_location_args, 3600)
         assert locations.has_key(jobid)
 
         location = locations[jobid]
