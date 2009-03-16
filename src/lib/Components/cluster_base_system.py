@@ -297,12 +297,12 @@ class ClusterBaseSystem (Component):
 
     
     # the argument "required" is used to pass in the set of locations allowed by a reservation;
-    def find_job_location(self, arg_list, utility_cutoff, backfill_cutoff):
+    def find_job_location(self, arg_list, backfill_cutoff):
         best_location_dict = {}
         
         # first time through, try for starting jobs based on utility scores
         for args in arg_list:
-            if args['utility_score'] < utility_cutoff:
+            if args['utility_score'] < arg_list[0]['threshold']:
                 break
             
             location_data = self._find_job_location(args)
@@ -336,9 +336,13 @@ class ClusterBaseSystem (Component):
         return -cmp(float(dict1['walltime']), float(dict2['walltime']))
 
 
-    def find_queue_equivalence_classes(self, reservation_dict):
+    def find_queue_equivalence_classes(self, reservation_dict, active_queue_names):
         equiv = []
         for q in self.queue_assignments:
+            # skip queues that aren't "running"
+            if not q in active_queue_names:
+                continue
+
             found_a_match = False
             for e in equiv:
                 if e['data'].intersection(self.queue_assignments[q]):
@@ -380,7 +384,7 @@ class ClusterBaseSystem (Component):
     
     
 
-    def reserve_partition_until(self, partition_name, time):
+    def reserve_partition_until(self, partition_name, time, pgroup_id):
         try:
             self.partitions[partition_name].reserved_until = time
         except:

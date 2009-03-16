@@ -20,7 +20,7 @@ import xmlrpclib
 
 import Cobalt.Logging
 from Cobalt.Data import Data, DataDict, IncrID
-from Cobalt.Components.base import Component, exposed, automatic, query
+from Cobalt.Components.base import Component, exposed, automatic, query, locking
 from Cobalt.Proxy import ComponentProxy
 from Cobalt.Exceptions import ProcessGroupCreationError, DataCreationError, ComponentLookupError
 
@@ -29,8 +29,8 @@ class ProcessGroup(Data):
     '''Run a script'''
 
     fields = Data.fields + [
-        "tag", "name", "location", "state", "user", "outputfile", "errorfile", "executable", "jobid",
-        "path", "cwd", "args", "envs", "inputfile", "kerneloptions", "id", 
+        "tag", "name", "location", "state", "user", "stdout", "stderr", "executable", "jobid",
+        "path", "cwd", "args", "env", "stdin", "kerneloptions", "id", "exit_status",
     ]
 
     def __init__(self, spec):
@@ -42,20 +42,21 @@ class ProcessGroup(Data):
         self.location = spec.pop("location", None)
         self.state = spec.pop("state", 'running')
         self.user = spec.pop("user", None)
-        self.outputfile = spec.pop("outputfile", None)
-        self.errorfile = spec.pop("errorfile", None)
+        self.stdout = spec.pop("stdout", None)
+        self.stderr = spec.pop("stderr", None)
         self.cobalt_log_file = spec.get('cobalt_log_file')
         self.executable = spec.pop("executable", None)
         self.jobid = spec.pop("jobid", None)
         self.path = spec.pop("path", None)
         self.cwd = spec.pop("cwd", None)
         self.args = spec.pop("args", [])
-        self.envs = spec.pop("args", None)
-        self.inputfile = spec.pop("inputfile", None)
+        self.env = spec.pop("env", None)
+        self.stdin = spec.pop("stdin", None)
         self.kerneloptions = spec.pop("kerneloptions", None)
         self.id = spec.get("id")
         
         self.mpi_system_id = None
+        self.exit_status = None
         
         self.log = logging.getLogger('pg')
         try:
@@ -65,12 +66,12 @@ class ProcessGroup(Data):
             home_dir = tmp_info[5]
         except KeyError:
             raise ProcessGroupCreationError, "user/group"
-        if self.outputfile is not None:
-            self.outlog = self.outputfile
+        if self.stdout is not None:
+            self.outlog = self.stdout
         else:
             self.outlog = tempfile.mktemp()            
-        if self.errorfile is not None:
-            self.errlog = self.errorfile
+        if self.stderr is not None:
+            self.errlog = self.stderr
         else:
             self.errlog = tempfile.mktemp()
 
@@ -162,23 +163,23 @@ class ProcessGroup(Data):
     def invoke_mpi_from_script(self, true_mpi_args):
         '''Run an mpirun job that was invoked by a script.'''
         self.state = 'running'
-        if self.outputfile is None:
+        if self.stdout is None:
             self.outputpath = "%s/%s.output" % (self.cwd, self.jobid)
-        if self.errorfile is None:
+        if self.stderr is None:
             self.errorpath = "%s/%s.error" % (self.cwd, self.jobid)
 
         try:
             pgroup = ComponentProxy("system").add_process_groups([{
                 'tag':'process-group',
                 'user':self.user, 
-                'stdout':self.outputfile,
-                'stderr':self.errorfile,
+                'stdout':self.stdout,
+                'stderr':self.stderr,
                 'cobalt_log_file':self.cobalt_log_file,
                 'cwd':self.cwd, 
                 'location': self.location,
-                'stdin':self.inputfile,
+                'stdin':self.stdin,
                 'true_mpi_args':true_mpi_args, 
-                'envs':{'path':self.path},
+                'env':{'path':self.path},
                 'size':0,
                 'executable':"this will be ignored"}])
         except (ComponentLookupError, xmlrpclib.Fault):
@@ -235,39 +236,45 @@ class ScriptManager(Component):
             if pgroup.FinishProcess():
                 del self.zombie_mpi[pgroup]
                 
-        if (time.time() - self.lastwait) > 6:
-            while True:
-                try:
-                    self.lastwait = time.time()
-                    (pid, stat) = os.waitpid(-1, os.WNOHANG)
-                except OSError:
-                    break
-                if pid == 0:
-                    break
-                pgrps = [pgrp for pgrp in self.pgroups.itervalues() if pgrp.pid == pid]
-                if len(pgrps) == 0:
-                    self.logger.error("Failed to locate process group for pid %s" % (pid))
-                elif len(pgrps) == 1:
-                    pgroup = pgrps[0]
-                    self.logger.info("Job %s/%s: ProcessGroup %s Finished with exit code %d. pid %s" % \
-                      (pgroup.jobid, pgroup.user, pgroup.jobid, int(stat)/256, pgroup.pid))
+        self.lock.acquire()
+        try:
+            if (time.time() - self.lastwait) > 6:
+                while True:
+                    try:
+                        self.lastwait = time.time()
+                        (pid, stat) = os.waitpid(-1, os.WNOHANG)
+                    except OSError:
+                        break
+                    if pid == 0:
+                        break
+                    pgrps = [pgrp for pgrp in self.pgroups.itervalues() if pgrp.pid == pid]
+                    if len(pgrps) == 0:
+                        self.logger.error("Failed to locate process group for pid %s" % (pid))
+                    elif len(pgrps) == 1:
+                        pgroup = pgrps[0]
+                        pgroup.exit_status = stat
+                        self.logger.info("Job %s/%s: ProcessGroup %s Finished with exit code %d. pid %s" % \
+                          (pgroup.jobid, pgroup.user, pgroup.jobid, int(stat)/256, pgroup.pid))
 
-                    if os.WIFSIGNALED(stat):
-                        self.logger.info("Job %s/%s: ProcessGroup %s received signal %s" % \
-                      (pgroup.jobid, pgroup.user, pgroup.jobid, os.WTERMSIG(stat)))
-                        try:
-                            err = open(pgroup.cobalt_log_file, 'a')
-                            print >> err, "The script job exited after receiving signal %s" % os.WTERMSIG(stat)
-                            err.close()
-                        except IOError:
-                            self.logger.error( "Job %s/%s: ProcessGroup %s failed to update .error file" % (pgroup.jobid, pgroup.user, pgroup.jobid))
+                        if os.WIFSIGNALED(stat):
+                            self.logger.info("Job %s/%s: ProcessGroup %s received signal %s" % \
+                          (pgroup.jobid, pgroup.user, pgroup.jobid, os.WTERMSIG(stat)))
+                            try:
+                                err = open(pgroup.cobalt_log_file, 'a')
+                                print >> err, "The script job exited after receiving signal %s" % os.WTERMSIG(stat)
+                                err.close()
+                            except IOError:
+                                self.logger.error( "Job %s/%s: ProcessGroup %s failed to update .error file" % (pgroup.jobid, pgroup.user, pgroup.jobid))
 
-                    if not pgroup.FinishProcess():
                         self.zombie_mpi[pgroup] = True
-                        
-                else:
-                    self.logger.error("Got more than one match for pid %s" % (pid))
-    manage_children = automatic(manage_children)
+                            
+                    else:
+                        self.logger.error("Got more than one match for pid %s" % (pid))
+        except:
+            # just to make sure we don't keep the lock forever
+            self.logger.error("error in manage_children", exc_info=True)
+        self.lock.release()
+    manage_children = locking(automatic(manage_children))
 
     def add_jobs(self, specs):
         '''Create new process group element'''
@@ -305,13 +312,20 @@ class ScriptManager(Component):
     
     def invoke_mpi_from_script(self, spec):
         '''Invoke the real mpirun on behalf of a script being executed by the script manager.'''
-        jobs = self.pgroups.q_get([{'jobid':spec['jobid'], 'user':spec['user']}])
+        self.lock.acquire()
+        try:
+            jobs = self.pgroups.q_get([{'jobid':spec['jobid'], 'user':spec['user']}])
+        except:
+            # just make sure we don't keep the lock forever
+            self.logger.error("error in invoke_mpi_from_script", exc_info=True)
+        self.lock.release()
+
         if len(jobs) != 1:
             self.logger.error("invoke_mpi_from_script matched more than one job with spec %r" % spec)
             return -1
         else:
             jobs[0].invoke_mpi_from_script(spec['true_mpi_args'])
             return jobs[0].mpi_system_id
-    invoke_mpi_from_script = exposed(invoke_mpi_from_script)
+    invoke_mpi_from_script = locking(exposed(invoke_mpi_from_script))
 
 

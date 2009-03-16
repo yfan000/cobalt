@@ -38,7 +38,7 @@ CP = ConfigParser.ConfigParser()
 CP.read(Cobalt.CONFIG_FILES)
 try:
     DEFAULT_LOG_DIRECTORY = CP.get('cqm', 'log_dir')
-except ConfigParser.NoOptionError:
+except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
     DEFAULT_LOG_DIRECTORY = Cobalt.DEFAULT_LOG_DIRECTORY
 
 # if os.path.exists( Cobalt.DEFAULT_LOG_DIRECTORY ):

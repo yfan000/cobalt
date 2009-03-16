@@ -80,7 +80,7 @@ import xmlrpclib
 import ConfigParser
 import sets
 import signal
-from threading import Thread
+from threading import Thread, Lock
 from datetime import timedelta
 import traceback
 
@@ -90,13 +90,14 @@ from Cobalt.Util import Timer
 import Cobalt.Cqparse
 from Cobalt.Data import Data, DataList, DataDict, IncrID
 from Cobalt.StateMachine import StateMachine
-from Cobalt.Components.base import Component, exposed, automatic, query
+from Cobalt.Components.base import Component, exposed, automatic, query, locking
 from Cobalt.Proxy import ComponentProxy
 from Cobalt.Exceptions import (QueueError, ComponentLookupError,
     DataStateError, DataStateTransitionError, StateMachineError,
     StateMachineIllegalEventError, StateMachineNonexistentEventError,
     JobProcessingError, JobPreemptionError)
 from Cobalt import accounting
+from Cobalt.Statistics import Statistics
 
 
 logger = logging.getLogger('cqm')
@@ -535,140 +536,80 @@ class Job (StateMachine):
     def __task_signal(self, retry = True):
         '''send a signal to the managed task'''
         # BRT: this routine should probably check if the task could not be signaled because it was no longer running
-        if self.mode == 'script':
-            try:
-                self.__sm_log_info("instructing the script manager to send signal %s" % (self.__signaling_info.signal,))
-                pgroup = ComponentProxy("script-manager").signal_jobs([{'id':self.taskid}], self.__signaling_info.signal)
-            except (ComponentLookupError, xmlrpclib.Fault), e:
-                if retry:
-                    self.__sm_log_warn("failed to communicate with the script manager (%s); retry pending" % (e,))
-                    return Job.__rc_retry
-                else:
-                    self.__sm_log_warn("failed to communicate with the script manager (%s); manual cleanup may be required" % (e,))
-                    return Job.__rc_xmlrpc
-            except:
-                self.__sm_raise_exception("unexpected error from the script manager (%s); manual cleanup may be required")
-                return Job.__rc_unknown
-        else:
-            try:
-                self.__sm_log_info("instructing the system component to send signal %s" % (self.__signaling_info.signal,))
-                pgroup = ComponentProxy("system").signal_process_groups([{'id':self.taskid}], self.__signaling_info.signal)
-            except (ComponentLookupError, xmlrpclib.Fault), e:
-                #
-                # BRT: will a ComponentLookupError ever be raised directly or will it always be buried in a XML-RPC fault?
-                #
-                # BRT: shouldn't we be checking the XML-RPC fault code?  which fault codes are valid for this operation?  at the
-                # very least unexpected fault code should be reported as such and the retry loop broken.
-                #
-                if retry:
-                    self.__sm_log_warn("failed to communicate with the system component (%s); retry pending" % (e,))
-                    return Job.__rc_retry
-                else:
-                    self.__sm_log_warn("failed to communicate with the system component (%s); manual cleanup may be required" % \
-                        (e,))
-                    return Job.__rc_xmlrpc
-            except:
-                traceback.print_exc()
-                self.__sm_raise_exception("unexpected error from the system component; manual cleanup may be required")
-                return Job.__rc_unknown
+        try:
+            self.__sm_log_info("instructing the system component to send signal %s" % (self.__signaling_info.signal,))
+            pgroup = ComponentProxy("system").signal_process_groups([{'id':self.taskid}], self.__signaling_info.signal)
+        except (ComponentLookupError, xmlrpclib.Fault), e:
+            #
+            # BRT: will a ComponentLookupError ever be raised directly or will it always be buried in a XML-RPC fault?
+            #
+            # BRT: shouldn't we be checking the XML-RPC fault code?  which fault codes are valid for this operation?  at the
+            # very least unexpected fault code should be reported as such and the retry loop broken.
+            #
+            if retry:
+                self.__sm_log_warn("failed to communicate with the system component (%s); retry pending" % (e,))
+                return Job.__rc_retry
+            else:
+                self.__sm_log_warn("failed to communicate with the system component (%s); manual cleanup may be required" % \
+                    (e,))
+                return Job.__rc_xmlrpc
+        except:
+            traceback.print_exc()
+            self.__sm_raise_exception("unexpected error from the system component; manual cleanup may be required")
+            return Job.__rc_unknown
 
         self.__signaled_info = self.__signaling_info
         del self.__signaling_info
         return Job.__rc_success
 
     def __task_run(self):
-        if self.mode == 'script':
-            # if the script has not already been started, then attempt to start it
-            if not self.taskid:
-                try:
-                    self.__sm_log_info("instructing the script manager to begin executing the script")
-                    pgroup = ComponentProxy("script-manager").add_jobs([{'tag':'process-group', 'user':self.user, 
-                        'outputfile':self.outputpath, 'cobalt_log_file':self.cobalt_log_file,
-                        'errorfile':self.errorpath, 'path':self.path, 'size':self.procs,
-                        'mode':self.mode, 'cwd':self.outputdir, 'executable':self.command,
-                        'args':self.args, 'envs':self.envs, 'location':[self.location[0]],
-                        'id':"*", 'inputfile':self.inputfile, 'kernel':self.kernel, 'kerneloptions':self.kerneloptions,
-                        'jobid':self.jobid, 'umask':self.umask}])
-                    if pgroup[0].has_key('id'):
-                        self.taskid = pgroup[0]['id']
-                    else:
-                        self.__sm_log_error("process group creation failed")
-                        return Job.__rc_pg_create
-                except (ComponentLookupError, xmlrpclib.Fault), e:
-                    self.__sm_log_warn("failed to start execution of the user's script (%s); retry pending" % (e,))
-                    return Job.__rc_retry
-                except:
-                    self.__sm_raise_exception("unexpected error returned from the script mananger when attempting to add task")
-                    return Job.__rc_unknown
-            # reserve the partition until 1 second after unix epoch -- i.e. cancel the reservation
-            try:
-                self.__sm_log_info("instructing the system component to reserve the partition for the duration of the task")
-                if self.preemptable and self.maxtasktime:
-                    reservation_time = self.maxtasktime
-                else:
-                    reservation_time = self.walltime
-                ComponentProxy("system").reserve_partition_until(self.location[0], time.time() + 60*float(reservation_time))
-            except (ComponentLookupError, xmlrpclib.Fault), e:
-                self.__sm_log_warn("failed to reserve the partition for the user's script (%s); retry pending" % (e,))
-                return Job.__rc_retry
-            except:
-                self.__sm_raise_exception("unexpected error returned from the system component when attempting to reserve the " + \
-                    "partition")
-                return Job.__rc_unknown
-        else:
-            try:
-                self.__sm_log_info("instructing the system component to begin executing the task")
-                pgroup = ComponentProxy("system").add_process_groups([{
-                    'jobid':self.jobid,
-                    'user':self.user,
-                    'stdin':self.inputfile,
-                    'stdout':self.outputpath,
-                    'stderr':self.errorpath,
-                    'cobalt_log_file':self.cobalt_log_file,
-                    'size':self.procs,
-                    'mode':self.mode,
-                    'cwd':self.outputdir,
-                    'executable':self.command,
-                    'args':self.args,
-                    'env':self.envs,
-                    'location':[self.location[0]],
-                    'id':"*", 'umask':self.umask,
-                    'kernel':self.kernel,
-                    'kerneloptions':self.kerneloptions,
-                }])
-                if pgroup[0].has_key('id'):
-                    self.taskid = pgroup[0]['id']
-                else:
-                    self.__sm_log_error("process group creation failed")
-                    return Job.__rc_pg_create
-            except (ComponentLookupError, xmlrpclib.Fault), e:
-                self.__sm_log_warn("failed to start execution of the user's task (%s); retry pending" % (e,))
-                return Job.__rc_retry
-            except:
-                self.__sm_raise_exception("unexpected error returned from the system component when attempting to add task")
-                return Job.__rc_unknown
+        walltime = self.walltime
+        if self.preemptable and self.maxtasktime < walltime:
+            walltime = self.maxtasktime
+        try:
+            self.__sm_log_info("instructing the system component to begin executing the task")
+            pgroup = ComponentProxy("system").add_process_groups([{
+                'id':"*",
+                'jobid':self.jobid,
+                'user':self.user,
+                'stdin':self.inputfile,
+                'stdout':self.outputpath,
+                'stderr':self.errorpath,
+                'cobalt_log_file':self.cobalt_log_file,
+                'size':self.procs,
+                'mode':self.mode,
+                'cwd':self.outputdir,
+                'executable':self.command,
+                'args':self.args,
+                'env':self.envs,
+                'location':[self.location[0]],
+                'umask':self.umask,
+                'kernel':self.kernel,
+                'kerneloptions':self.kerneloptions,
+                'walltime':walltime
+            }])
+            if pgroup[0].has_key('id'):
+                self.taskid = pgroup[0]['id']
+            else:
+                self.__sm_log_error("process group creation failed")
+                return Job.__rc_pg_create
+        except (ComponentLookupError, xmlrpclib.Fault), e:
+            self.__sm_log_warn("failed to start execution of the user's task (%s); retry pending" % (e,))
+            return Job.__rc_retry
+        except:
+            self.__sm_raise_exception("unexpected error returned from the system component when attempting to add task")
+            return Job.__rc_unknown
 
         return Job.__rc_success
 
     def __task_finalize(self):
         '''get exit code from system component'''
         try:
-            if self.mode == 'script':
-                if not has_private_attr(self, "__task_finalize_waited"):
-                    result = ComponentProxy("script-manager").wait_jobs([{'id':self.taskid, 'exit_status':'*'}])
-                    self.__task_finalize_waited = True
-                    if result:
-                        self.exit_status = result[0].get('exit_status')
-                    else:
-                        self.__sm_log_warn("script manager was unable to locate the task; exit status not obtained")
-                ComponentProxy("system").reserve_partition_until(self.location[0], 1)
-                del self.__task_finalize_waited
+            result = ComponentProxy("system").wait_process_groups([{'id':self.taskid, 'exit_status':'*'}])
+            if result:
+                self.exit_status = result[0].get('exit_status')
             else:
-                result = ComponentProxy("system").wait_process_groups([{'id':self.taskid, 'exit_status':'*'}])
-                if result:
-                    self.exit_status = result[0].get('exit_status')
-                else:
-                    self.__sm_log_warn("system component was unable to locate the task; exit status not obtained")
+                self.__sm_log_warn("system component was unable to locate the task; exit status not obtained")
         except (ComponentLookupError, xmlrpclib.Fault), e:
             self.__sm_log_warn("failed to communicate with the system component (%s); retry pending" % (e,))
             return Job.__rc_retry
@@ -1761,26 +1702,7 @@ class Job (StateMachine):
         return self.__walltime
 
     def __set_walltime(self, walltime):
-        # if this is a script mode job, and the job has resources, then the partition reservation needs to be adjusted
-        #
-        # FIXME: this would require a retry sequence (thread unlock, sleep, thread relock) if contacting the script manager
-        # failed.  since the script manager will be integrated into the system component, the code below won't be necessary and
-        # thus is ignored for the moment.
-        #
         # FIXME: does the system component need to be informed of walltime changes???
-        #
-        # if self.mode == 'script' and not self.preemptable and not self.maxtasktime:
-        #     try:
-        #         self.__sm_log_info("instructing the system component to reserve the partition for the duration of the task")
-        #         ComponentProxy("system").reserve_partition_until(self.location[0], time.time() + 60*float(walltime))
-        #     except (ComponentLookupError, xmlrpclib.Fault), e:
-        #         self.__sm_log_warn("failed to reserve the partition for the user's script (%s); retry pending" % (e,))
-        # 
-        #     except:
-        #         self.__sm_raise_exception("unexpected error returned from the system component when attempting to reserve " + \
-        #             "the partition")
-        #         return Job.__rc_unknown
-        #
         self.__walltime = int(float(walltime))
         try:
             self.__max_job_timer.max_time = walltime * 60
@@ -2339,6 +2261,8 @@ class QueueManager(Component):
         
         self.prevdate = time.strftime("%m-%d-%y", time.localtime())
         self.cqp = Cobalt.Cqparse.CobaltLogParser()
+        self.lock = Lock()
+        self.statistics = Statistics()
 
     def __save_me(self):
         Component.save(self)
@@ -2369,26 +2293,17 @@ class QueueManager(Component):
             logger.error("Failed to communicate with the system component when attempting to acquire a list of active " + \
                 "process groups")
             return
-        live = [item['id'] for item in pgroups]
-        for job in [j for queue in self.Queues.itervalues() for j in queue.jobs if j.mode != 'script']:
-            if job.task_running and job.taskid not in live:
-                logger.info("Job %s/%s: process group no longer executing" % (job.jobid, job.user))
-                job.task_end()
-    __poll_process_groups = automatic(__poll_process_groups, float(get_cqm_config('poll_process_groups_interval', 10)))
 
-    def __poll_script_manager(self):
-        '''Resynchronize with the script manager'''
+        self.lock.acquire()
         try:
-            pgroups = ComponentProxy("script-manager").get_jobs([{'id':'*', 'state':'running'}])
-        except (ComponentLookupError, xmlrpclib.Fault):
-            logger.error("Failed to communicate with the script manager when attempting to acquire a list of active processes")
-            return
-        live = [item['id'] for item in pgroups]
-        for job in [j for queue in self.Queues.itervalues() for j in queue.jobs if j.mode == 'script']:
-            if job.task_running and job.taskid not in live:
-                logger.info("Job %s/%s: script no longer executing" % (job.jobid, job.user))
-                job.task_end()
-    __poll_script_manager = automatic(__poll_script_manager,  float(get_cqm_config('poll_script_manager_interval', 10)))
+            live = [item['id'] for item in pgroups]
+            for job in [j for queue in self.Queues.itervalues() for j in queue.jobs]:
+                if job.task_running and job.taskid not in live:
+                    logger.info("Job %s/%s: process group no longer executing" % (job.jobid, job.user))
+                    job.task_end()
+        finally:
+            self.lock.release()
+    __poll_process_groups = locking(automatic(__poll_process_groups, float(get_cqm_config('poll_process_groups_interval', 10))))
 
     #
     # job operations

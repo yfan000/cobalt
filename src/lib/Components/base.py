@@ -13,6 +13,7 @@ import sys
 import getopt
 import logging
 import time
+import threading
 import xmlrpclib
 
 import Cobalt
@@ -21,7 +22,7 @@ import Cobalt.Logging
 from Cobalt.Server import XMLRPCServer, find_intended_location
 from Cobalt.Data import get_spec_fields
 from Cobalt.Exceptions import NoExposedMethod
-
+from Cobalt.Statistics import Statistics
 
 
 def state_file_location():
@@ -141,9 +142,14 @@ def automatic (func, period=10):
     func.automatic_ts = -1
     return func
 
-def forkable (func):
-    '''mark a handler as forkable'''
-    func.forkable = True
+def locking (func):
+    """Mark a function as being internally thread safe"""
+    func.locking = True
+    return func
+
+def readonly (func):
+    """Mark a function as read-only -- no data effects in component inst"""
+    func.readonly = True
     return func
 
 def query (func=None, **kwargs):
@@ -163,7 +169,6 @@ def marshal_query_result (items, specs=None):
     else:
         fields = None
     return [item.to_rx(fields) for item in items]
-
 
 class Component (object):
     
@@ -196,6 +201,8 @@ class Component (object):
         if kwargs.get("register", True):
             Cobalt.Proxy.register_component(self)
         self.logger = logging.getLogger("%s %s" % (self.implementation, self.name))
+        self.lock = threading.Lock()
+        self.statistics = Statistics()
         
     def save (self, statefile=None):
         """Pickle the component.
@@ -205,13 +212,6 @@ class Component (object):
         """
         statefile = statefile or self.statefile
         if statefile:
-            try:
-                os.stat(statefile)
-            except OSError:
-                pass
-            else:
-                os.rename(statefile, statefile + ".old")
-
             temp_statefile = statefile + ".temp"
             data = cPickle.dumps(self)
             try:
@@ -220,8 +220,11 @@ class Component (object):
                 fd.close()
             except IOError, e:
                 self.logger.error("statefile failure : %s" % e)
+                return str(e)
             else:
                 os.rename(temp_statefile, statefile)
+                return "state saved to file: %s" % statefile
+    save = exposed(save)
     
     def do_tasks (self):
         """Perform automatic tasks for the component.
@@ -231,10 +234,24 @@ class Component (object):
         """
         for name, func in inspect.getmembers(self, callable):
             if getattr(func, "automatic", False):
+                need_to_lock = not getattr(func, 'locking', False)
                 if (time.time() - func.automatic_ts) > func.automatic_period:
+                    if need_to_lock:
+                        t1 = time.time()
+                        self.lock.acquire()
+                        t2 = time.time()
+                        self.statistics.add_value('component_lock', t2-t1)
                     try:
+                        mt1 = time.time()
                         func()
+                    except:
+                        self.logger.error("Automatic method %s failed" \
+                                          % (name), exc_info=1)
                     finally:
+                        mt2 = time.time()
+                        if need_to_lock:
+                            self.lock.release()
+                        self.statistics.add_value(name, mt2-mt1)
                         func.__dict__['automatic_ts'] = time.time()
 
     def _resolve_exposed_method (self, method_name):
@@ -250,27 +267,49 @@ class Component (object):
         if not getattr(func, "exposed", False):
             raise NoExposedMethod(method_name)
         return func
-    
-    def _dispatch (self, method, args):
+
+    def _dispatch (self, method, args, dispatch_dict):
         """Custom XML-RPC dispatcher for components.
         
         method -- XML-RPC method name
         args -- tuple of paramaters to method
         """
+        if method in dispatch_dict:
+            method_func = dispatch_dict[method]
+        else:
+            try:
+                method_func = self._resolve_exposed_method(method)
+            except Exception, e:
+                if getattr(e, "log", True):
+                    self.logger.error(e, exc_info=True)
+                raise xmlrpclib.Fault(getattr(e, "fault_code", 1), str(e))
+        
+        need_to_lock = not getattr(method_func, 'locking', False)
+        if need_to_lock:
+            lock_start = time.time()
+            self.lock.acquire()
+            lock_done = time.time()
         try:
-            func = self._resolve_exposed_method(method)
-            result = func(*args)
-            if getattr(func, "query", False):
-                if not getattr(func, "query_all_methods", False):
-                    margs = args[:1]
-                else:
-                    margs = []
-                result = marshal_query_result(result, *margs)
-            return result
+            method_start = time.time()
+            result = method_func(*args)
         except Exception, e:
             if getattr(e, "log", True):
                 self.logger.error(e, exc_info=True)
             raise xmlrpclib.Fault(getattr(e, "fault_code", 1), str(e))
+        finally:
+            method_done = time.time()
+            if need_to_lock:
+                self.lock.release()
+                self.statistics.add_value('component_lock',
+                                      lock_done - lock_start)
+            self.statistics.add_value(method, method_done - method_start)
+        if getattr(method_func, "query", False):
+            if not getattr(method_func, "query_all_methods", False):
+                margs = args[:1]
+            else:
+                margs = []
+            result = marshal_query_result(result, *margs)
+        return result
     
     def _listMethods (self):
         """Custom XML-RPC introspective method list."""
@@ -300,3 +339,8 @@ class Component (object):
         """The implementation of the component."""
         return self.implementation
     get_implementation = exposed(get_implementation)
+
+    def get_statistics (self):
+        """Get current statistics about component execution"""
+        return self.statistics.display()
+    get_statistics = exposed(get_statistics)

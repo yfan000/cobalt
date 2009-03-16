@@ -110,8 +110,16 @@ if __name__ == '__main__':
     
     if opts['schedinfo']:
         print "The most recent scheduling attempt reports:\n"
-        cqm = ComponentProxy("queue-manager", defer=False)
-        sched = ComponentProxy("scheduler", defer=False)
+        try:
+            cqm = ComponentProxy("queue-manager", defer=False)
+        except:
+            print >> sys.stderr, "Failed to connect to queue manager"
+            sys.exit(1)
+        try:
+            sched = ComponentProxy("scheduler", defer=False)
+        except:
+            print >> sys.stderr, "Failed to connect to scheduler"
+            sys.exit(1)
         jobs = cqm.get_jobs([{'jobid':"*", 'queue':"*", 'is_active':"*", 'has_completed':False, 'user_hold':"*", 'admin_hold':"*",
                               'dependencies':"*"}])
         queues = cqm.get_queues([{'name':"*", 'state':"*"}])
@@ -166,10 +174,10 @@ if __name__ == '__main__':
     default_header = ['JobID', 'User', 'WallTime', 'Nodes', 'State', 'Location']
     full_header    = ['JobID', 'JobName', 'User', 'WallTime', 'QueuedTime',
                       'RunTime', 'Nodes', 'State', 'Location', 'Mode', 'Procs',
-                      'Queue', 'StartTime', 'Index']
+                      'Preemptable', 'Queue', 'StartTime', 'Index']
     long_header    = ['JobID', 'JobName', 'User', 'WallTime', 'QueuedTime',
                       'RunTime', 'Nodes', 'State', 'Location', 'Mode', 'Procs',
-                      'Queue', 'StartTime', 'Index', 'SubmitTime', 'Path',
+                      'Preemptable', 'Queue', 'StartTime', 'Index', 'SubmitTime', 'Path',
                       'OutputDir', 'Envs', 'Command', 'Args', 'Kernel', 'KernelOptions',
                       'Project', 'Dependencies', 'short_state']
     header = None
@@ -251,6 +259,8 @@ if __name__ == '__main__':
             # location
             if isinstance(j['location'], types.ListType) and len(j['location']) > 1:
                 j['location'] = mergelist(j['location'])
+            elif isinstance(j['location'], types.ListType) and len(j['location']) == 1:
+                j['location'] = j['location'][0]
             # queuedtime
             if j.get('starttime') in ('-1', 'BUG', 'N/A', None):
                 j['queuedtime'] = get_elapsed_time(float(j.get('submittime')), time.time())

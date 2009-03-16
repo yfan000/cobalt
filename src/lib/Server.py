@@ -78,56 +78,33 @@ tlslite.integration.TLSSocketServerMixIn.TLSConnection = TLSConnection
 
 
 class CobaltXMLRPCDispatcher (SimpleXMLRPCServer.SimpleXMLRPCDispatcher):
-        
+    logger = logging.getLogger("Cobalt.Server.CobaltXMLRPCDispatcher")
     def __init__ (self, allow_none, encoding):
-        SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self, allow_none, encoding)
+        SimpleXMLRPCServer.SimpleXMLRPCDispatcher.__init__(self,
+                                                           allow_none,
+                                                           encoding)
         self.allow_none = allow_none
         self.encoding = encoding
-        self.forkable = []
-        
-    def _marshaled_dispatch (self, data, dispatch_method=None):
+
+    def _marshaled_dispatch (self, data):
+        method_func = None
+        params, method = xmlrpclib.loads(data)
         try:
-            params, method = xmlrpclib.loads(data)
-            if method in self.forkable:
-                pid = os.fork()
-                if pid:
-                    raise ForkedChild
-            if dispatch_method is not None:
-                response = dispatch_method(method, params)
-            else:
-                response = self._dispatch(method, params)
-            if method not in self.forkable and False:
-                pid = os.fork()
-                if pid:
-                    raise ForkedChild
+            response = self.instance._dispatch(method, params, self.funcs)
             response = (response,)
-            response = xmlrpclib.dumps(response, methodresponse=1,
-                                       allow_none=self.allow_none,
-                                       encoding=self.encoding)
+            raw_response = xmlrpclib.dumps(response, methodresponse=1,
+                                           allow_none=self.allow_none,
+                                           encoding=self.encoding)
         except xmlrpclib.Fault, fault:
-            response = xmlrpclib.dumps(fault,
-                                       allow_none=self.allow_none,
-                                       encoding=self.encoding)
-        except ForkedChild:
-            raise
+            raw_response = xmlrpclib.dumps(fault,
+                                           allow_none=self.allow_none,
+                                           encoding=self.encoding)
         except:
             # report exception back to server
-            response = xmlrpclib.dumps(
+            raw_response = xmlrpclib.dumps(
                 xmlrpclib.Fault(1, "%s:%s" % (sys.exc_type, sys.exc_value)),
                 allow_none=self.allow_none, encoding=self.encoding)
-        return response
-
-    def register_instance(self, instance, *args, **kwargs):
-        SimpleXMLRPCServer.SimpleXMLRPCDispatcher.register_instance(self,
-                                                                    instance,
-                                                                    *args,
-                                                                    **kwargs)
-        # figure out which methods are forkable and record them as such
-        self.forkable = []
-        for mname, method in inspect.getmembers(instance, callable):
-            if getattr(method, 'exposed', False) and \
-            getattr(method, 'forkable', False):
-                self.forkable.append(mname)
+        return raw_response
 
 class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer, object):
     
@@ -143,7 +120,8 @@ class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer, object):
     allow_reuse_address = True
     logger = logging.getLogger("Cobalt.Server.TCPServer")
     
-    def __init__ (self, server_address, RequestHandlerClass, keyfile=None, certfile=None, reqCert=False, timeout=None):
+    def __init__ (self, server_address, RequestHandlerClass, keyfile=None,
+                  certfile=None, reqCert=False, timeout=None):
         
         """Initialize the SSL-TCP server.
         
@@ -157,8 +135,9 @@ class TCPServer (TLSSocketServerMixIn, SocketServer.TCPServer, object):
         reqCert -- client must present certificate
         timeout -- timeout for non-blocking request handling
         """
-        
-        SocketServer.TCPServer.__init__(self, server_address, RequestHandlerClass)
+
+        all_iface_address = ('', server_address[1])
+        SocketServer.TCPServer.__init__(self, all_iface_address, RequestHandlerClass)
         
         self.socket.settimeout(timeout)
         
@@ -303,9 +282,7 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
                 size_remaining -= len(L[-1])
             data = ''.join(L)
 
-            response = self.server._marshaled_dispatch(data, None)
-        except ForkedChild:
-            return
+            response = self.server._marshaled_dispatch(data)
         except: 
             raise
             self.send_response(500)
@@ -323,7 +300,8 @@ class XMLRPCRequestHandler (SimpleXMLRPCServer.SimpleXMLRPCRequestHandler):
             self.connection.shutdown(1)
    
 
-class XMLRPCServer (TCPServer, CobaltXMLRPCDispatcher, object):
+class XMLRPCServer (SocketServer.ThreadingMixIn, TCPServer, 
+                    CobaltXMLRPCDispatcher, object):
     
     """Component XMLRPCServer.
     
@@ -369,7 +347,7 @@ class XMLRPCServer (TCPServer, CobaltXMLRPCDispatcher, object):
         if not RequestHandlerClass:
             class RequestHandlerClass (XMLRPCRequestHandler):
                 """A subclassed request handler to prevent class-attribute conflicts."""
-        
+
         TCPServer.__init__(self,
             server_address, RequestHandlerClass,
             timeout=timeout, keyfile=keyfile, certfile=certfile)
@@ -378,7 +356,10 @@ class XMLRPCServer (TCPServer, CobaltXMLRPCDispatcher, object):
         self.register = register
         self.register_introspection_functions()
         self.register_function(self.ping)
+        self.task_thread = threading.Thread(target=self._tasks_thread)
         self.logger.info("service available at %s" % self.url)
+        self.timeout = timeout
+
     
     def _get_register (self):
         return self._register
@@ -433,6 +414,18 @@ class XMLRPCServer (TCPServer, CobaltXMLRPCDispatcher, object):
                 time.sleep(frequency)
         except:
             self.logger.error("slp_thread failed", exc_info=1)
+
+    def _tasks_thread (self):
+        try:
+            while self.serve:
+                try:
+                    if self.instance and hasattr(self.instance, 'do_tasks'):
+                        self.instance.do_tasks()
+                except:
+                    self.logger.error("Unexpected task failure", exc_info=1)
+                time.sleep(self.timeout)
+        except:
+            self.logger.error("tasks_thread failed", exc_info=1)
     
     def server_close (self):
         TCPServer.server_close(self)
@@ -460,15 +453,13 @@ class XMLRPCServer (TCPServer, CobaltXMLRPCDispatcher, object):
         """Serve single requests until (self.serve == False)."""
         self.serve = True
         master_pid = os.getpid()
+        self.task_thread.start()
         self.logger.info("serve_forever() [start]")
         sigint = signal.signal(signal.SIGINT, self._handle_shutdown_signal)
         sigterm = signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
+
         try:
             while self.serve:
-                try:
-                    os.waitpid(0, os.WNOHANG)
-                except:
-                    pass
                 try:
                     self.handle_request()
                 except socket.timeout:
@@ -476,17 +467,6 @@ class XMLRPCServer (TCPServer, CobaltXMLRPCDispatcher, object):
                 except:
                     self.logger.error("Got unexpected error in handle_request",
                                       exc_info=1)
-                if self.instance and hasattr(self.instance, "do_tasks"):
-                    try:
-                        self.instance.do_tasks()
-                    except:
-                        self.logger.error("Task executaion failure", exc_info=1)
-                if os.getpid() != master_pid:
-                    os._exit(0)
-                try:
-                    os.waitpid(0, os.WNOHANG)
-                except:
-                    pass
         finally:
             self.logger.info("serve_forever() [stop]")
     
