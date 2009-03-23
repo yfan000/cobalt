@@ -68,7 +68,7 @@ if __name__ == '__main__':
         sys.exit(0)
     if '-h' in sys.argv or '--help' in sys.argv:
         print __helpmsg__
-        sys.exit(1)
+        sys.exit(0)
 
     options = {'d':'debug', 'f':'full', 'l':'long', 'version':'version',
                'Q':'Q', 'schedinfo':'schedinfo'}
@@ -105,13 +105,13 @@ if __name__ == '__main__':
         cqm = ComponentProxy("queue-manager", defer=False)
     except ComponentLookupError:
         print >> sys.stderr, "Failed to connect to queue manager"
-        sys.exit(1)
+        sys.exit(2)
     
     try:
         queues = cqm.get_queues([{'name':"*", 'state':"*"}])
     except:
         print >> sys.stderr, "Failed to get queue list from queue manager"
-        sys.exit(1)
+        sys.exit(2)
 
     level = 30
     if opts['debug']:
@@ -127,7 +127,7 @@ if __name__ == '__main__':
             sched = ComponentProxy("scheduler", defer=False)
         except:
             print >> sys.stderr, "Failed to contact scheduler"
-            sys.exit(1)
+            sys.exit(2)
         jobs = cqm.get_jobs([{'jobid':"*", 'queue':"*", 'is_active':"*", 'has_completed':False, 'admin_hold':"*", 'user_hold':"*",
                               'dependencies':"*"}])
         sched_info = sched.get_sched_info()
@@ -166,7 +166,7 @@ if __name__ == '__main__':
         if len(args) and not jobs:
             sys.exit(1)
         else:
-            sys.exit()
+            sys.exit(0)
         
     Cobalt.Logging.setup_logging('qstat', to_syslog=False, level=level)
 
@@ -194,7 +194,7 @@ if __name__ == '__main__':
         cqm = ComponentProxy("queue-manager", defer=False)
     except ComponentLookupError:
         print >> sys.stderr, "Failed to connect to queue manager"
-        sys.exit(1)
+        sys.exit(2)
 
     if opts['Q']:  # querying for queues
         query = [{'name':qname, 'users':'*', 
@@ -228,7 +228,7 @@ if __name__ == '__main__':
                     query.append({'tag':'job', 'jobid':int(n), 'queue':'*'})
         except ValueError:
             print "%s is not a valid jobid or queue name" % n
-            sys.exit(1)
+            sys.exit(2)
         for q in query:
             for h in long_header:
                 if h == 'JobName':

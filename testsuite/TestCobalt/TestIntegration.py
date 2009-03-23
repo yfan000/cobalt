@@ -5,9 +5,6 @@ import time
 import traceback
 import logging
 
-# import Cobalt
-# Cobalt.CONFIG_FILES = ()
-
 import TestCobalt
 from Cobalt.Components.slp import TimingServiceLocator
 from Cobalt.Components.cqm import QueueManager
@@ -16,16 +13,7 @@ from Cobalt.Components.scriptm import ScriptManager
 from Cobalt.Proxy import ComponentProxy
 import Cobalt.Proxy
 from Cobalt.Exceptions import ComponentLookupError
-from TestCobalt.Utilities.ThreadSupport import *
-
-# class TSQueueManager (QueueManager):
-#     __metaclass__ = ThreadSafeComponent
-# 
-# class TSSimulator (Simulator):
-#     __metaclass__ = ThreadSafeComponent
-# 
-# class TSScriptManager (ScriptManager):
-#     __metaclass__ = ThreadSafeComponent
+from Utilities.ThreadSupport import *
 
 class TestIntegration (object):
     def setup (self):
@@ -100,7 +88,7 @@ class TestIntegration (object):
         jobid = job['jobid']
         job_location_args = [{'jobid':jobid, 'nodes':job['nodes'], 'queue':job['queue'], 'utility_score':1, 'threshold': 1,
             'walltime':job['walltime']}]
-        locations = simulator.find_job_location(job_location_args, 3600)
+        locations = simulator.find_job_location(job_location_args, [])
         assert locations.has_key(jobid)
 
         location = locations[jobid]
@@ -139,7 +127,7 @@ class TestIntegration (object):
         jobid = job['jobid']
         job_location_args = [{'jobid':jobid, 'nodes': job['nodes'], 'queue': job['queue'], 'utility_score': 1, 'threshold': 1,
             'walltime': job['walltime']}]
-        locations = simulator.find_job_location(job_location_args, 3600)
+        locations = simulator.find_job_location(job_location_args, [])
         assert locations.has_key(jobid)
 
         location = locations[jobid]
