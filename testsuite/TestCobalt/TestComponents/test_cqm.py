@@ -932,7 +932,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
             time.sleep(POLL_INTERVAL)
 
     def job_exec_driver(
-            self, spec = {}, configs = {}, job_queued = None, job_pretask = None, resource_pretask = None, exec_task = True,
+            self, spec = {}, config_opts = {}, job_queued = None, job_pretask = None, resource_pretask = None, exec_task = True,
             task_run = None, task_wait = None, task_active = None, task_complete = None, num_preempts = 0, job_preempt = None,
             job_preempting = None, preempt_posttask = None, job_preempted = None, preempt_pretask = None, resource_posttask = None,
             job_posttask = None, job_complete = None, script_check = CHECK_ALL_SCRIPTS, wait_script_timeout = 60):
@@ -967,6 +967,8 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 add_spec['preemptable'] = True
 
             syncs = []
+            configs = {}
+            configs.update(config_opts)
             if job_pretask != None or script_check:
                 self.job_prescripts = create_wait_scripts(1, wait_script_timeout)
                 configs['job_prescripts'] = ":".join(get_script_filenames(self.job_prescripts))
@@ -1242,6 +1244,14 @@ class CQMIntegrationTestBase (TestCQMComponent):
         self.job_exec_driver(job_queued = _job_queued, exec_task = False)
 
     @timeout(10)
+    def test_nonpreempt_queued__force_kill(self):
+        # forcibly kill a queued job
+        def _job_queued():
+            self.assert_job_state("queued")
+            self.job_kill(force = True)
+        self.job_exec_driver(job_queued = _job_queued, exec_task = False)
+
+    @timeout(10)
     def test_nonpreempt_queued__preempt(self):
         # the job is queued; attempts to preempt the job should result in an error
         def _job_queued():
@@ -1340,6 +1350,17 @@ class CQMIntegrationTestBase (TestCQMComponent):
 
 
     @timeout(10)
+    def test_nonpreempt_hold__force_kill(self):
+        # the job is in the hold state; forcibly killing the job should result in immediate termination
+        def _job_queued():
+            self.assert_job_state("queued")
+            self.job_user_hold()
+            self.assert_job_state("user_hold")
+            self.job_kill(force = True)
+        self.job_exec_driver(job_queued = _job_queued, exec_task = False)
+
+
+    @timeout(10)
     def test_nonpreempt_hold__preempt(self):
         # the job is in the hold state; attempts to preempt the job should fail
         def _job_queued():
@@ -1407,8 +1428,23 @@ class CQMIntegrationTestBase (TestCQMComponent):
         # the job is starting but a task has not been started; attempts to kill the job should succeed without the task ever
         # starting
         def _pretask():
-            self.job_kill()
             self.assert_job_state("starting")
+            self.job_kill()
+        # cqm should never entering the running state.  if it does, then something is wrong with the state machine.  to detect
+        # this problem, we do nothing during the running state, causing any task that might have been started not to be completed
+        # (task_finished is not called by the template).  this will result in the the test hanging in job_finished_wait() until
+        # the timeout is reached.
+        def _task_run(preempt):
+            pass
+        self.job_exec_driver(job_pretask = _pretask, task_run = _task_run)
+        self.job_exec_driver(resource_pretask = _pretask, task_run = _task_run)
+
+    @timeout(10)
+    def test_nonpreempt_starting__force_kill(self):
+        # the job is starting but a task has not been started; forcibly killing a job should always work
+        def _pretask():
+            self.assert_job_state("starting")
+            self.job_kill(force = True)
         # cqm should never entering the running state.  if it does, then something is wrong with the state machine.  to detect
         # this problem, we do nothing during the running state, causing any task that might have been started not to be completed
         # (task_finished is not called by the template).  this will result in the the test hanging in job_finished_wait() until
@@ -1488,6 +1524,18 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert op[3] == Signal_Map.terminate
             self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Killing"})
         self.job_exec_driver(task_active = _task_active)
+
+    def test_nonpreempt_running__force_kill(self):
+        # a task is running; let's forcibly kill it
+        def _task_active():
+            self.job_kill(force = True)
+            op = self.assert_next_task_op('signal')
+            assert op[3] == Signal_Map.terminate
+        # the job should just disappear, so the normal task completion actions should not be required; if the test hangs, then it
+        # is likely that the force kill failed
+        def _task_complete():
+            pass
+        self.job_exec_driver(task_active = _task_active, task_complete = _task_complete)
 
     @timeout(10)
     def test_nonpreempt_running__kill_failed(self):
@@ -1673,6 +1721,24 @@ class CQMIntegrationTestBase (TestCQMComponent):
             # the task has not been started so we shouldn't tell the task manager that it's complete
             pass
         self.job_exec_driver(job_queued = _job_queued, task_wait = _task_wait, task_complete = _task_complete)
+    @whitebox
+    @timeout(10)
+    def test_nonpreempt_run_retry__force_kill(self):
+        def _progress_off(op, exc, specs):
+            assert op == "add"
+            self.qm_thr.pause()
+        def _job_queued():
+            self.taskman.add_exc('add', BogusException1("error1"), _progress_off)
+        def _task_wait():
+            self.assert_next_task_op('add', BogusException1)
+            self.qm_thr.pause_wait()
+            self.job_get_state(assert_spec = {'state':"starting", 'sm_state':"Run_Retry"})
+            self.job_kill(force = True)
+            self.qm_thr.resume()
+        def _task_complete():
+            # the task has not been started so we shouldn't tell the task manager that it's complete
+            pass
+        self.job_exec_driver(job_queued = _job_queued, task_wait = _task_wait, task_complete = _task_complete)
 
     @whitebox
     @timeout(10)
@@ -1787,6 +1853,30 @@ class CQMIntegrationTestBase (TestCQMComponent):
 
     @whitebox
     @timeout(10)
+    def test_nonpreempt_kill_retry__force_kill(self):
+        def _progress_off(op, exc, specs, signame):
+            assert op == "signal"
+            assert signame == "SIGUSR2"
+            self.qm_thr.pause()
+        def _task_active():
+            self.taskman.add_exc('signal', BogusException1("error1"), _progress_off)
+            self.job_kill(signame = "SIGUSR2")
+            op = self.assert_next_task_op('signal', BogusException1)
+            assert op[3] == "SIGUSR2"
+            self.qm_thr.pause_wait()
+            self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Kill_Retry"})
+            self.job_kill(force = True, signame = "SIGINT")
+            op = self.assert_next_task_op('signal')
+            assert op[3] == "SIGINT"
+            self.qm_thr.resume()
+        # the job should just disappear, so the normal task completion actions should not be required; if the test hangs, then it
+        # is likely that the force kill failed
+        def _task_complete():
+            pass
+        self.job_exec_driver(task_active = _task_active, task_complete = _task_complete)
+
+    @whitebox
+    @timeout(10)
     def test_nonpreempt_kill_retry__preempt(self):
         def _progress_off(op, exc, specs, signame):
             assert op == "signal"
@@ -1889,6 +1979,22 @@ class CQMIntegrationTestBase (TestCQMComponent):
         self.job_exec_driver(task_active = _task_active)
 
     @timeout(10)
+    def test_nonpreempt_killing__force_kill(self):
+        def _task_active():
+            self.job_kill(signame = "SIGUSR2")
+            op = self.assert_next_task_op('signal')
+            assert op[3] == "SIGUSR2"
+            self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Killing"})
+            self.job_kill(force = True, signame = "SIGINT")
+            op = self.assert_next_task_op('signal')
+            assert op[3] == "SIGINT"
+        # the job should just disappear, so the normal task completion actions should not be required; if the test hangs, then it
+        # is likely that the force kill failed
+        def _task_complete():
+            pass
+        self.job_exec_driver(task_active = _task_active, task_complete = _task_complete)
+
+    @timeout(10)
     def test_nonpreempt_killing__preempt(self):
         def _task_active():
             self.job_kill()
@@ -1954,6 +2060,14 @@ class CQMIntegrationTestBase (TestCQMComponent):
         # the job is exiting; attempts to kill the job should be ignored
         def _posttask():
             self.job_kill()
+            self.assert_job_state("exiting")
+        self.job_exec_driver(job_posttask = _posttask)
+        self.job_exec_driver(resource_posttask = _posttask)
+
+    @timeout(10)
+    def test_nonpreempt_exiting__force_kill(self):
+        def _posttask():
+            self.job_kill(force = True)
             self.assert_job_state("exiting")
         self.job_exec_driver(job_posttask = _posttask)
         self.job_exec_driver(resource_posttask = _posttask)
@@ -2478,6 +2592,33 @@ class CQMIntegrationTestBase (TestCQMComponent):
 
     @whitebox
     @timeout(10)
+    def test_preempt_preempt_retry__force_kill(self):
+        def _progress_off(op, exc, specs, signame):
+            assert op == "signal"
+            assert signame == Signal_Map.checkpoint
+            self.qm_thr.pause()
+            self.test_progress_off_count += 1
+        def _job_preempt():
+            self.taskman.add_exc('signal', BogusException1("error1"), _progress_off)
+            self.job_preempt()
+            op = self.assert_next_task_op('signal', BogusException1)
+            assert op[3] == Signal_Map.checkpoint
+            self.qm_thr.pause_wait()
+            self.job_get_state(assert_spec = {'state':"preempting", 'sm_state':"Preempt_Retry"})
+            self.job_kill(force = True, signame = "SIGUSR2")
+            self.qm_thr.resume()
+            op = self.assert_next_task_op('signal')
+            assert op[3] == "SIGUSR2"
+            return False
+        num_preempts = 10
+        self.test_progress_off_count = 0
+        self.job_exec_driver(num_preempts = num_preempts, spec = {'maxcptime':1, 'maxtasktime':2, 'walltime':3},
+            job_preempt = _job_preempt)
+        assert self.test_progress_off_count == 1
+        del self.test_progress_off_count
+
+    @whitebox
+    @timeout(10)
     def test_preempt_preempt_retry__task_end_no_signal(self):
         def _progress_off(op, exc, specs, signame):
             assert op == "signal"
@@ -2673,6 +2814,23 @@ class CQMIntegrationTestBase (TestCQMComponent):
             job_preempting = _job_preempting)
 
     @timeout(10)
+    def test_preempt_preempting__force_kill(self):
+        def _job_preempt():
+            self.job_preempt()
+            op = self.assert_next_task_op('signal')
+            assert op[3] == Signal_Map.terminate
+        def _job_preempting():
+            # no checkpoint time was request so the terminate signal is used for both the preempt and the kill; as a result, no
+            # signal will be sent to the task
+            self.job_preempting_wait()
+            self.job_kill(force = True)
+            op = self.assert_next_task_op('signal')
+            assert op[3] == Signal_Map.terminate
+            return False
+        num_preempts = 10
+        self.job_exec_driver(num_preempts = num_preempts, job_preempt = _job_preempt, job_preempting = _job_preempting)
+
+    @timeout(10)
     def test_preempt_preempting__finalize_failed(self):
         def _job_preempting():
             self.taskman.add_exc('wait', BogusException1("error1"))
@@ -2787,6 +2945,25 @@ class CQMIntegrationTestBase (TestCQMComponent):
             return False
         self.job_exec_driver(num_preempts = 1, job_preempting = _job_preempting, preempt_posttask = _preempt_posttask)
 
+    @timeout(10)
+    def test_preempt_preempt_finalize_retry__force_kill(self):
+        def _progress_off(op, exc, specs):
+            assert op == "wait"
+            self.qm_thr.pause()
+        def _job_preempting():
+            self.taskman.add_exc('wait', BogusException1("error1"), _progress_off)
+            self.taskman.add_exc('wait', BogusException2("error2"))
+            self.job_preempting_wait()
+            self.task_finished(0)
+            self.assert_next_task_op('wait', BogusException1)
+            self.qm_thr.pause_wait()
+            self.job_get_state(assert_spec = {'state':"preempting", 'sm_state':"Preempt_Finalize_Retry"})
+            self.job_kill(force = True)
+            self.qm_thr.resume()
+            self.assert_next_task_op('wait', BogusException2)
+            return False
+        self.job_exec_driver(num_preempts = 1, job_preempting = _job_preempting)
+
     #
     # BRT: the appropriate behavior needs to be defined for this situation and added to CQM
     #
@@ -2849,6 +3026,13 @@ class CQMIntegrationTestBase (TestCQMComponent):
         self.job_exec_driver(num_preempts = 1, preempt_posttask = _preempt_posttask)
 
     @timeout(10)
+    def test_preempt_posttask__force_kill(self):
+        def _preempt_posttask():
+            self.job_kill(force = True)
+            return False
+        self.job_exec_driver(num_preempts = 1, preempt_posttask = _preempt_posttask)
+
+    @timeout(10)
     def test_preempt_preempted__hold(self):
         def _job_preempted():
             self.job_user_hold(new_hold = True)
@@ -2865,6 +3049,13 @@ class CQMIntegrationTestBase (TestCQMComponent):
     def test_preempt_preempted__kill(self):
         def _job_preempted():
             self.job_kill()
+            return False
+        self.job_exec_driver(num_preempts = 1, job_preempted = _job_preempted)
+
+    @timeout(10)
+    def test_preempt_preempted__force_kill(self):
+        def _job_preempted():
+            self.job_kill(force = True)
             return False
         self.job_exec_driver(num_preempts = 1, job_preempted = _job_preempted)
 
@@ -2910,6 +3101,13 @@ class CQMIntegrationTestBase (TestCQMComponent):
         self.job_exec_driver(num_preempts = num_preempts, resource_posttask = _posttask, job_posttask = _posttask)
         assert self.test_posttask_count == 2
         del self.test_posttask_count
+
+    @timeout(10)
+    def test_preempt_exiting__force_kill(self):
+        def _posttask():
+            self.job_kill(force = True)
+        num_preempts = 2
+        self.job_exec_driver(num_preempts = num_preempts, job_posttask = _posttask)
 
     @timeout(10)
     def test_preempt_exiting__preempt(self):

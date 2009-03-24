@@ -125,7 +125,7 @@ if __name__ == '__main__':
             if cmd == '--delete':
                 response = cqm.del_jobs(spec, True, user)
             else:
-                response = cqm.del_jobs(spec, user)
+                response = cqm.del_jobs(spec, False, user)
     elif opts['run']:
         location = opts['run']
         part_list = ComponentProxy("system").get_partitions([{'name': location}])

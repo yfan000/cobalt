@@ -255,7 +255,7 @@ class Job (StateMachine):
     ctime = property(lambda self: self.__timers['queue'].start_times[0])
     qtime = property(lambda self:
         self.__timers['current_queue'].start_times[0])
-    start = property(lambda self: self.__timers['user'].start_times[0])
+    start = property(lambda self: self.__timers['user'].start_times[-1])
     exec_host = property(lambda self: ":".join(self.location))
     end = property(lambda self: self.__timers['user'].stop_times[-1])
     
@@ -428,7 +428,8 @@ class Job (StateMachine):
             ('Job_Epilogue', 'Preempt') : [self.__sm_exit_common__preempt],
             ('Job_Epilogue', 'Kill') : [self.__sm_exit_common__kill],
             }
-        StateMachine.__init__(self, spec, seas = seas, terminal_actions = [(self.__sm_terminal, {})])
+        # StateMachine.__init__(self, spec, seas = seas, terminal_actions = [(self.__sm_terminal, {})])
+        StateMachine.__init__(self, spec, seas = seas)
         
         self.jobid = spec.get("jobid")
         self.umask = spec.get("umask")
@@ -509,6 +510,7 @@ class Job (StateMachine):
         # this needs to be done only after the object has been initialized
         self.queue = spec.get("queue", "default")
         self.__timers['queue'].start()
+        self.etime = time.time()
 
         # setting the hold flags will automatically cause the appropriate hold events to be triggered, so this needs to be done
         # only after the object has been completely initialized
@@ -706,8 +708,8 @@ class Job (StateMachine):
     def __sm_check_job_timers(self):
         if self.__max_job_timer.has_expired:
             # if the job execution time has exceeded the wallclock time, then inform the task that it must terminate
-            accounting_logger.info(accounting.abort(self.jobid))
             self.__sm_log_info("maximum execution time exceeded; initiating job terminiation")
+            accounting_logger.info(accounting.abort(self.jobid))
             return Signal_Info(Signal_Info.Reason.time_limit, Signal_Map.terminate)
         else:
             return None
@@ -854,7 +856,7 @@ class Job (StateMachine):
         '''release a hold previous placed on a job'''
         activity = False
 
-    def __sm_common_hold__release(self, args, queued_state):
+    def __sm_common_hold__release(self, queued_state, args):
         '''release a hold previous placed on a job in a hold state'''
         activity = False
 
@@ -878,6 +880,7 @@ class Job (StateMachine):
         if not self.__admin_hold and not self.__user_hold:
             self.__sm_log_info("no holds remain; releasing job", cobalt_log = True)
             self.__timers['hold'].stop()
+            self.etime = time.time()
             self.__sm_state = queued_state
 
     def __sm_ready__run(self, args):
@@ -908,14 +911,6 @@ class Job (StateMachine):
 
         self.location = args['nodelist']
 
-        # group and session are unknown
-        accounting_logger.info(accounting.start(self.jobid, self.user,
-            "unknown", self.jobname, self.queue, self.ctime, self.qtime,
-            self.etime, self.start, self.exec_host,
-            {'ncpus':self.procs, 'nodect':self.nodes,
-                'walltime':timedelta(minutes=self.walltime)},
-            "unknown"))
-
         # write job start and project information to CQM and accounting logs
         if self.reservation:
             logger.info('R;%s;%s;%s' % (self.jobid, self.queue, self.user))
@@ -934,6 +929,14 @@ class Job (StateMachine):
             logger.info("Job %s/%s/Q:%s: Running job on %s" % (self.jobid, self.user, self.queue, ":".join(self.location)))
             self.acctlog.LogMessage("Job %s/%s/Q:%s: Running job on %s" % (self.jobid, self.user, self.queue, \
                 ":".join(self.location)))
+
+        # group and session are unknown
+        accounting_logger.info(accounting.start(self.jobid, self.user,
+            "unknown", self.jobname, self.queue, self.ctime, self.qtime,
+            self.etime, self.start, self.exec_host,
+            {'ncpus':self.procs, 'nodect':self.nodes,
+                'walltime':timedelta(minutes=self.walltime)},
+            "unknown"))
 
         # notify the user that the job is starting; a separate thread is used to send the email so that cqm does not block
         # waiting for the smtp server to respond
@@ -991,7 +994,7 @@ class Job (StateMachine):
 
     def __sm_hold__release(self, args):
         '''release a hold previous placed on a job'''
-        self.__sm_common_hold__release(args, 'Ready')
+        self.__sm_common_hold__release('Ready', args)
 
     def __sm_hold__kill(self, args):
         '''delete a job in the hold state'''
@@ -1431,7 +1434,17 @@ class Job (StateMachine):
             self.__sm_start_job_epilogue_scripts()
             return
             
-        # write job preemption  information to CQM and accounting logs
+        # stop the execution timer and output accounting log entry
+        self.__timers['user'].stop()
+        self.__max_job_timer.stop()
+        if self.__max_job_timer.has_expired:
+            # if the job execution time has exceeded the wallclock time, then proceed to cleanup and remove the job
+            self.__sm_log_info("maximum execution time exceeded; initiating job cleanup and removal", cobalt_log = True)
+            accounting_logger.info(accounting.abort(self.jobid))
+            self.__sm_start_job_epilogue_scripts()
+            return
+
+        # write job preemption information to CQM and accounting logs
         if self.project:
             logger.info("Job %s/%s/%s/Q:%s: Preempted job" % (self.jobid, self.user, self.project, self.queue))
             self.acctlog.LogMessage("Job %s/%s/%s/Q:%s: Preempted job" % (self.jobid, self.user, self.project, self.queue))
@@ -1439,19 +1452,10 @@ class Job (StateMachine):
             logger.info("Job %s/%s/Q:%s: Preempted job" % (self.jobid, self.user, self.queue))
             self.acctlog.LogMessage("Job %s/%s/Q:%s: Preempted job" % (self.jobid, self.user, self.queue))
 
-        accounting_logger.info(accounting.abort(self.jobid))
+        accounting_logger.info(accounting.rerun(self.jobid))
 
         self.__sm_log_info("job successfully preempted", cobalt_log = True)
         self.__preempts += 1
-
-        # stop the execution timer and output accounting log entry
-        self.__timers['user'].stop()
-        self.__max_job_timer.stop()
-        if self.__max_job_timer.has_expired:
-            # if the job execution time has exceeded the wallclock time, then proceed to cleanup and remove the job
-            self.__sm_log_info("maximum execution time exceeded; initiating job cleanup and removal", cobalt_log = True)
-            self.__sm_start_job_epilogue_scripts()
-            return
 
         # start the queue timers
         self.__timers['queue'].start()
@@ -1486,18 +1490,32 @@ class Job (StateMachine):
         # set the list of resources being used
         self.location = args['nodelist']
 
-        accounting_logger.info(accounting.rerun(self.jobid))
-
-        # write job rerun information to CQM and accounting logs
+        # write job restart and project information to CQM and accounting logs
+        if self.reservation:
+            logger.info('R;%s;%s;%s' % (self.jobid, self.queue, self.user))
+            self.acctlog.LogMessage('R;%s;%s;%s' % (self.jobid, self.queue, self.user))
+        else:
+            logger.info('S;%s;%s;%s;%s;%s;%s;%s' % (self.jobid, self.user, self.jobname, self.nodes, self.procs, self.mode, \
+                self.walltime))
+            self.acctlog.LogMessage('S;%s;%s;%s;%s;%s;%s;%s' % (self.jobid, self.user, self.jobname, self.nodes, self.procs, \
+                self.mode, self.walltime))
         if self.project:
-            logger.info("Job %s/%s/%s/Q:%s: Rerunning job on %s" % (self.jobid, self.user, self.project, self.queue, \
+            logger.info("Job %s/%s/%s/Q:%s: Running job on %s" % (self.jobid, self.user, self.project, self.queue, \
                 ":".join(self.location)))
-            self.acctlog.LogMessage("Job %s/%s/%s/Q:%s: Rerunning job on %s" % (self.jobid, self.user, self.project, self.queue, \
+            self.acctlog.LogMessage("Job %s/%s/%s/Q:%s: Running job on %s" % (self.jobid, self.user, self.project, self.queue, \
                 ":".join(self.location)))
         else:
-            logger.info("Job %s/%s/Q:%s: Rerunning job on %s" % (self.jobid, self.user, self.queue, ":".join(self.location)))
-            self.acctlog.LogMessage("Job %s/%s/Q:%s: Rerunning job on %s" % (self.jobid, self.user, self.queue, \
+            logger.info("Job %s/%s/Q:%s: Running job on %s" % (self.jobid, self.user, self.queue, ":".join(self.location)))
+            self.acctlog.LogMessage("Job %s/%s/Q:%s: Running job on %s" % (self.jobid, self.user, self.queue, \
                 ":".join(self.location)))
+
+        # group and session are unknown
+        accounting_logger.info(accounting.start(self.jobid, self.user,
+            "unknown", self.jobname, self.queue, self.ctime, self.qtime,
+            self.etime, self.start, self.exec_host,
+            {'ncpus':self.procs, 'nodect':self.nodes,
+                'walltime':timedelta(minutes=self.walltime)},
+            "unknown"))
 
         # start resource prologue scripts
         resource_scripts = get_cqm_config('resource_prescripts', "").split(':')
@@ -1522,7 +1540,7 @@ class Job (StateMachine):
         # set signal information so that the terminal state handler knows to write the delete record
         self.__signaled_info = Signal_Info(Signal_Info.Reason.delete, args['signal'], args['user'])
 
-        # start the resource epilogue scripts
+        # start the job epilogue scripts
         self.__sm_start_job_epilogue_scripts()
 
     def __sm_preempted_hold__hold(self, args):
@@ -1531,7 +1549,7 @@ class Job (StateMachine):
 
     def __sm_preempted_hold__release(self, args):
         '''release a hold previous placed on a job'''
-        self.__sm_common_hold__release(args, 'Preempted')
+        self.__sm_common_hold__release('Preempted', args)
 
     def __sm_preempted_hold__kill(self, args):
         '''user delete requested while job was preempted and held'''
@@ -1541,8 +1559,8 @@ class Job (StateMachine):
         # set signal information so that the terminal state handler knows to write the delete record
         self.__signaled_info = Signal_Info(Signal_Info.Reason.delete, args['signal'], args['user'])
 
-        # start the resource epilogue scripts
-        self.__sm_start_resource_epilogue_scripts()
+        # start the job epilogue scripts
+        self.__sm_start_job_epilogue_scripts()
 
     def __sm_exit_common__hold(self, args):
         '''attempt to add a hold to a job that is exiting'''
@@ -1622,53 +1640,47 @@ class Job (StateMachine):
                 toaddr = toaddr + self.notify.split(':')
             thread.start_new_thread(Cobalt.Util.sendemail, toaddr, subj, mmsg, smtpserver = mserver)
 
-        # finish up accounting for job
+        # write end of job information to CQM and accounting logs
         used_time = int(self.__timers['user'].elapsed_time) * len(self.location)
         logger.info('E;%s;%s;%s' % (self.jobid, self.user, str(used_time)))
         self.acctlog.LogMessage('E;%s;%s;%s' % (self.jobid, self.user, str(used_time)))
         self.endtime = str(time.time())
 
-        # write end of job information to CQM and accounting
-        logger.info("Job %s/%s on %s nodes done. %s" % (self.jobid, self.user, self.nodes, stats))
-        self.acctlog.LogMessage("Job %s/%s on %s nodes done. %s exit:%s" % \
-            (self.jobid, self.user, self.nodes, stats, str(self.exit_status)))
-
-        # create a end-of-job record
-        req_walltime_minutes = self.walltime % 60
-        req_walltime_hours = self.walltime // 60
-        
-        runtime = int(self.__timers['user'].elapsed_time)
-        walltime_seconds = runtime % 60
-        walltime_minutes = runtime % (60 * 60) // 60
-        walltime_hours = runtime // (60 * 60)
-        
-        # group, session, exit_status are unknown
         optional = {}
         if self.project:
             optional['account'] = self.project
+        if self.exit_status != None:
+            exit_status = self.exit_status
+        else:
+            exit_status = "unknown"
+        # group and session are unknown
         accounting_logger.info(accounting.end(self.jobid, self.user,
             "unknown", self.jobname, self.queue, self.ctime, self.qtime,
             self.etime, self.start, self.exec_host,
             {'ncpus':self.procs, 'nodect':self.nodes,
                 'walltime':timedelta(minutes=int(self.walltime))},
-            "unknown", self.end, "unknown",
+            "unknown", self.end, exit_status,
             {'walltime':
                 timedelta(seconds=self.__timers['user'].elapsed_time)},
             **optional))
         
+        logger.info("Job %s/%s on %s nodes done. %s" % (self.jobid, self.user, self.nodes, stats))
+        self.acctlog.LogMessage("Job %s/%s on %s nodes done. %s exit:%s" % \
+            (self.jobid, self.user, self.nodes, stats, str(self.exit_status)))
+
         self.__sm_state = 'Terminal'
 
-    def __sm_terminal(self, args):
-        try:
-            reason = self.__signaled_info.reason
-        except AttributeError:
-            return
-        else:
-            if reason == Signal_Info.Reason.delete:
-                accounting_logger.info(accounting.delete(self.jobid,
-                    self.__signaled_info.user))
-                logger.info('D;%s;%s' % (self.jobid, self.user))
-                self.acctlog.LogMessage('D;%s;%s' % (self.jobid, self.user))
+    # def __sm_terminal(self, args):
+    #     try:
+    #         reason = self.__signaled_info.reason
+    #     except AttributeError:
+    #         return
+    #     else:
+    #         if reason == Signal_Info.Reason.delete:
+    #             accounting_logger.info(accounting.delete(self.jobid,
+    #                 self.__signaled_info.user))
+    #             logger.info('D;%s;%s' % (self.jobid, self.user))
+    #             self.acctlog.LogMessage('D;%s;%s' % (self.jobid, self.user))
 
     def __sm_get_state(self):
         return StateMachine._state.__get__(self)
@@ -1843,15 +1855,15 @@ class Job (StateMachine):
 
     preempts = property(__get_preempts)
 
-    def __get_eligible_run_time(self):
-        '''Return the time the job was first eligible to run'''
-
-        try:
-            return self.__timers['hold'].stop_times[-1] # job became eligible at end of last hold
-        except KeyError:
-            return self.__timers['queue'].start_times[0] # job has always been eligible to run
-
-    etime = property(__get_eligible_run_time)
+    # def __get_eligible_run_time(self):
+    #     '''Return the time the job was first eligible to run'''
+    #     # if self.__preempts > 0 or not self.__timers.has_key('hold'):
+    #     try:
+    #         return self.__timers['hold'].stop_times[-1] # job became eligible at end of last hold
+    #     except KeyError:
+    #         return self.__timers['queue'].start_times[0] # job has always been eligible to run
+    # 
+    # etime = property(__get_eligible_run_time)
 
     def __get_stats(self):
         '''Get job execution statistics from timers'''
@@ -1926,6 +1938,11 @@ class Job (StateMachine):
         if user is None:
             user = self.user
 
+        # write job delete information to CQM and accounting logs
+        accounting_logger.info(accounting.delete(self.jobid, user))
+        logger.info('D;%s;%s' % (self.jobid, self.user))
+        self.acctlog.LogMessage('D;%s;%s' % (self.jobid, self.user))
+
         if not force:
             self.trigger_event('Kill', {'user' : user, 'signal' : signame})
             # try:
@@ -1937,12 +1954,44 @@ class Job (StateMachine):
             self.__sm_log_info(("forced delete requested by user '%s'; initiating job termination and removal of job " + \
                 "from the queue") % (user,), cobalt_log = True)
             self.__signaling_info = Signal_Info(Signal_Info.Reason.delete, signame, user)
-            self.__task_signal(retry = False)
-            # try:
-            #     self.__task_signal(retry = False)
-            # except:
-            #     self.__sm_log_exception(None, "Job %s/%s: an exception occurred while attempting to forcibly kill the task" % \
-            #         (self.jobid, self.user))
+            try:
+                if self.taskid != None:
+                    self.__task_signal(retry = False)
+            except:
+                self.__sm_log_exception(None, "Job %s/%s: an exception occurred while attempting to forcibly kill the task" % \
+                    (self.jobid, self.user))
+            finally:
+                # if the job is running or has run at some point, then collect and output end of job information
+                if self.__sm_state not in ('Ready', 'Hold'):
+                    # stop the execution timer and get the stats
+                    if self.__timers['user'].is_active:
+                        self.__timers['user'].stop()
+                    stats = self.__get_stats()
+                    
+                    # write end of job information to CQM and accounting logs
+                    used_time = int(self.__timers['user'].elapsed_time) * len(self.location)
+                    logger.info('E;%s;%s;%s' % (self.jobid, self.user, str(used_time)))
+                    self.acctlog.LogMessage('E;%s;%s;%s' % (self.jobid, self.user, str(used_time)))
+                    self.endtime = str(time.time())
+                    
+                    optional = {}
+                    if self.project:
+                        optional['account'] = self.project
+                    # group, session and exit_status are unknown
+                    accounting_logger.info(accounting.end(self.jobid, self.user,
+                        "unknown", self.jobname, self.queue, self.ctime, self.qtime,
+                        self.etime, self.start, self.exec_host,
+                        {'ncpus':self.procs, 'nodect':self.nodes,
+                            'walltime':timedelta(minutes=int(self.walltime))},
+                        "unknown", self.end, "unknown",
+                        {'walltime':
+                            timedelta(seconds=self.__timers['user'].elapsed_time)},
+                        **optional))
+                    
+                    logger.info("Job %s/%s on %s nodes forcibly terminated by user %s. %s" % \
+                        (self.jobid, self.user, self.nodes, user, stats))
+                    self.acctlog.LogMessage("Job %s/%s on %s nodes forcibly terminated by user %s. %s" % \
+                        (self.jobid, self.user, self.nodes, user, stats))
 
     def task_end(self):
         '''handle the completion of a task'''

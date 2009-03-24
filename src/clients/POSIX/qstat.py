@@ -184,8 +184,9 @@ if __name__ == '__main__':
                       'Preemptable', 'Queue', 'StartTime', 'Index']
     long_header    = ['JobID', 'JobName', 'User', 'WallTime', 'QueuedTime',
                       'RunTime', 'Nodes', 'State', 'Location', 'Mode', 'Procs',
-                      'Preemptable', 'Queue', 'StartTime', 'Index', 'SubmitTime', 'Path',
-                      'OutputDir', 'Envs', 'Command', 'Args', 'Kernel', 'KernelOptions',
+                      'Preemptable', 'User_Hold', 'Admin_Hold', 'Queue',
+                      'StartTime', 'Index', 'SubmitTime', 'Path', 'OutputDir',
+                      'Envs', 'Command', 'Args', 'Kernel', 'KernelOptions',
                       'Project', 'Dependencies', 'short_state']
     header = None
     query_dependencies = {'QueuedTime':['SubmitTime', 'StartTime'], 'RunTime':['StartTime']}
