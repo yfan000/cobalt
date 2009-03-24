@@ -11,8 +11,10 @@ import ConfigParser
 import popen2
 from datetime import date, datetime
 from getopt import getopt, GetoptError
-from Cobalt.Exceptions import TimeFormatError, TimerException
+from Cobalt.Exceptions import TimeFormatError, TimerException, ThreadPickledAliveException
 import logging
+from threading import Thread
+import inspect
 
 import Cobalt
 
@@ -405,3 +407,155 @@ class Timer (object):
         return list(self.__stop_times)
 
     stop_times = property(__get_stop_times, doc = "list of end times")
+
+
+def getattrname(clsname, attrname):
+    '''return mangled private attribute names so that they may be looked up in the dictionary or using getattr()'''
+    if attrname[0:2] != "__" or attrname[-2:] == "__":
+        return attrname
+    else:
+        return "_" + clsname + attrname
+
+class ClassInfoMetaclass (type):
+    '''when a class is created, add private attributes to the class that contain a reference to the class and the class name'''
+    def __init__(cls, name, bases, dict):
+        type.__init__(cls, name, bases, dict)
+        setattr(cls, getattrname(name, "__cls"), cls)
+        setattr(cls, getattrname(name, "__clsname"), name)
+
+_class_list_map = {}
+
+def _get_class_list(cls):
+    '''
+    return a list of the classes used to construct the supplied class.  the list is ordered such that a base class will always
+    appear before classes derived from that base class.
+    '''
+    try:
+        return _class_list_map[cls]
+    except KeyError:
+        classes = []
+        classtree = inspect.getclasstree([cls], True)
+        if len(classtree) > 1:
+            for superclass, super2classes in classtree[0::2]:
+                for sc in _get_class_list(superclass):
+                    if sc not in classes:
+                        classes.append(sc)
+        classes.append(cls)
+        _class_list_map[cls] = classes
+        return classes
+
+
+_class_pickle_methods_map = {}
+_class_unpickle_methods_map = {}
+
+def _get_pickle_method_list(cls):
+    try:
+        return _class_pickle_methods_map[cls]
+    except KeyError:
+        methods = []
+        for cls in _get_class_list(cls):
+            method = getattr(cls, getattrname(cls.__name__, "__pickle_data"), None)
+            if method and callable(method):
+                methods.append(method)
+        _class_pickle_methods_map[cls] = methods
+        return methods
+
+def _get_unpickle_method_list(cls):
+    try:
+        return _class_unpickle_methods_map[cls]
+    except KeyError:
+        methods = []
+        for cls in _get_class_list(cls):
+            method = getattr(cls, getattrname(cls.__name__, "__unpickle_data"), None)
+            if method and callable(method):
+                methods.append(method)
+        _class_unpickle_methods_map[cls] = methods
+        return methods
+
+def pickle_data(obj):
+    data = obj.__dict__.copy()
+    for method in _get_pickle_method_list(obj.__class__):
+        method(obj, data)
+    return data
+
+def unpickle_data(obj, data):
+    obj.__dict__.update(data)
+    for method in _get_unpickle_method_list(obj.__class__):
+        method(obj, data)
+
+
+class PickleAwareThread (object):
+    __metaclass__ = ClassInfoMetaclass
+
+    def __init__(self, group = None, target = None, name = None, args = (), kwargs = {}):
+        self.__thread = Thread(group = group, target = self.__run_thread, name = name, args = args, kwargs = kwargs)
+        self.__group = group
+        self.__target = target
+        self.__name = self.__thread.getName()
+        self.__args = args
+        self.__kwargs = kwargs
+        self.__is_daemon = self.__thread.isDaemon()
+        self.__started = False
+        self.__stopped = False
+
+    def __pickle_data(self, data):
+        del data[getattrname(self.__clsname, "__thread")]
+
+    def __unpickle_data(self, data):
+        if not self.__started:
+            self.__thread = Thread(group = self.__group, target = self.__run_thread, name = self.__name, args = self.__args,
+                kwargs = self.__kwargs)
+        else:
+            self.__thread = None
+
+    def __getstate__(self):
+        return pickle_data(self)
+
+    def __setstate__(self, data):
+        unpickle_data(self, data)
+
+    def start(self):
+        if self.__thread:
+            self.__started = True
+            self.__thread.start()
+        else:
+            assert False, "thread already started"
+
+    def __run_thread(self):
+        self.__started = True
+        self.run()
+        self.__stopped = True
+
+    def run(self):
+        if self.__target:
+            self.__target(*self.__args, **self.__kwargs)
+
+    def join(self, timeout = None):
+        if self.__thread:
+            self.__thread.join(timeout)
+        elif not self.__stopped:
+            raise ThreadPickledAliveException
+
+    def getName(self):
+        return self.__name
+
+    def setName(self, name):
+        self.__name = name
+        if self.__thread:
+            self.__thread.setName(name)
+
+    def isAlive(self):
+        if self.__thread:
+            return self.__thread.isAlive()
+        elif self.__stopped:
+            return False
+        else:
+            raise ThreadPickledAliveException
+
+    def isDaemon(self):
+        return self.__is_daemon
+
+    def setDaemon(self, daemonic):
+        assert not self.__started, "cannot set daemon status of active thread"
+        self.__thread.setDaemon(daemonic)
+        self.is_daemon = daemonic

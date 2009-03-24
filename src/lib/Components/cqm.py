@@ -86,7 +86,7 @@ import traceback
 
 import Cobalt
 import Cobalt.Util
-from Cobalt.Util import Timer
+from Cobalt.Util import Timer, pickle_data, unpickle_data, PickleAwareThread
 import Cobalt.Cqparse
 from Cobalt.Data import Data, DataList, DataDict, IncrID
 from Cobalt.StateMachine import StateMachine
@@ -95,7 +95,7 @@ from Cobalt.Proxy import ComponentProxy
 from Cobalt.Exceptions import (QueueError, ComponentLookupError,
     DataStateError, DataStateTransitionError, StateMachineError,
     StateMachineIllegalEventError, StateMachineNonexistentEventError,
-    JobProcessingError, JobPreemptionError)
+    JobProcessingError, JobPreemptionError, ThreadPickledAliveException)
 from Cobalt import accounting
 from Cobalt.Statistics import Statistics
 
@@ -192,7 +192,7 @@ class Signal_Info (object):
     pending = property(__get_pending, __set_pending)
 
 
-class Threaded_Scripts (Thread):
+class RunScriptsThread (PickleAwareThread):
     '''object to run a set of prologue and epilogue scripts in a separate thread'''
 
     def __init__(self, scripts, data_object, attrs):
@@ -200,7 +200,7 @@ class Threaded_Scripts (Thread):
         construct the thread object in which to run the scripts, and package up the parameters to be passed to the scripts from the
         attributes in the supplied data object.
         '''
-        Thread.__init__(self)
+        PickleAwareThread.__init__(self)
         self.__scripts = scripts
         params = []
         for attr in attrs:
@@ -216,10 +216,15 @@ class Threaded_Scripts (Thread):
         self.__params = " ".join(params)
         self.__results = []
 
+    def __getstate__(self):
+        return pickle_data(self)
+
+    def __setstate__(self, data):
+        unpickle_data(self, data)
+
     def run(self):
         '''
-        for internal use only.  when start() is called, the thread object constructs a new thread and begins executing the run
-        routine within that thread.  the run routine should never be called directly.
+        routine that runs the scripts and collects their results
         '''
         for script in self.__scripts:
             results = {}
@@ -241,6 +246,22 @@ class Threaded_Scripts (Thread):
         return self.__results
 
     results = property(__get_results)
+
+    def __get_scripts_provided(self):
+        '''return the list of scripts that was provided when the object was initialized'''
+        return self.__scripts
+
+    scripts_provided = property(__get_scripts_provided)
+
+    def __get_scripts_completed(self):
+        '''
+        return a list of the script known to have completed.  once the thread has finished, this list returned should be the same
+        as the list provided during initialization.  the exception would be if the object was pickled and the reconstituted
+        before the last script finished.
+        '''
+        return [result['script'] for result in results]
+
+    scripts_completed = property(__get_scripts_completed)
 
 
 class Job (StateMachine):
@@ -776,19 +797,26 @@ class Job (StateMachine):
 
     def __sm_start_resource_epilogue_scripts(self, new_state = 'Resource_Epilogue'):
         resource_scripts = get_cqm_config('resource_postscripts', "").split(':')
-        self.__sm_scripts_thread = Threaded_Scripts(resource_scripts, self, self.fields)
+        self.__sm_scripts_thread = RunScriptsThread(resource_scripts, self, self.fields)
         self.__sm_scripts_thread.start()
         self.__sm_state = new_state
 
     def __sm_start_job_epilogue_scripts(self, new_state = 'Job_Epilogue'):
         job_scripts = get_cqm_config('job_postscripts', "").split(':')
-        self.__sm_scripts_thread = Threaded_Scripts(job_scripts, self, self.fields)
+        self.__sm_scripts_thread = RunScriptsThread(job_scripts, self, self.fields)
         self.__sm_scripts_thread.start()
         self.__sm_state = new_state
 
     def __sm_scripts_are_finished(self, type):
-        if self.__sm_scripts_thread.isAlive():
-            return False
+        try:
+            if self.__sm_scripts_thread.isAlive():
+                return False
+        except ThreadPickledAliveException:
+            if not has_private_attr(self, "__sm_scripts_state_unknown"):
+                self.__sm_log_error(("restart of cqm left running scripts in an unknown state; job has been frozen; " + \
+                    "scripts=%s; scripts_completed=%s") % (":".join(self.__sm_scripts_thread.scripts_provided), \
+                    ":".join(self.__sm_scripts_thread.scripts_completed)), cobalt_log = True)
+                self.__sm_scripts_state_unknown = True
 
         for result in self.__sm_scripts_thread.results:
             if result.has_key('exception'):
@@ -969,7 +997,7 @@ class Job (StateMachine):
         # start job and resource prologue scripts
         job_scripts = get_cqm_config('job_prescripts', "").split(':')
         resource_scripts = get_cqm_config('resource_prescripts', "").split(':')
-        self.__sm_scripts_thread = Threaded_Scripts(job_scripts + resource_scripts, self, self.fields)
+        self.__sm_scripts_thread = RunScriptsThread(job_scripts + resource_scripts, self, self.fields)
         self.__sm_scripts_thread.start()
 
         self.__sm_state = 'Prologue'
@@ -1519,7 +1547,7 @@ class Job (StateMachine):
 
         # start resource prologue scripts
         resource_scripts = get_cqm_config('resource_prescripts', "").split(':')
-        self.__sm_scripts_thread = Threaded_Scripts(resource_scripts, self, self.fields)
+        self.__sm_scripts_thread = RunScriptsThread(resource_scripts, self, self.fields)
         self.__sm_scripts_thread.start()
 
         self.__sm_state = 'Prologue'

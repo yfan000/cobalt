@@ -85,3 +85,7 @@ class StateMachineIllegalEventError (Exception):
 class StateMachineNonexistentEventError (Exception):
     log = True
     fault_code = fault_code_counter.next()
+
+class ThreadPickledAliveException (Exception):
+    log = True
+    fault_code = fault_code_counter.next()
