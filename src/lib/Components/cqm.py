@@ -7,6 +7,11 @@ __revision__ = '$Revision$'
 #
 # TODO:
 #
+# - remove _StateMachine__seas and _StateMachine__terminal_action from the list of items not to be pickled.  for some reason
+#   python 2.5.1 on the machine pickles these just fine, but the same version of python on the BG login nodes does not.  without
+#   these attributes, the state machine will fail with a nonexistent event when the job is restored, but if they are included
+#   state will not be saved if a job is present in any of the queues.
+#
 # - modify progress routine to catch exceptions and report them using __sm_log_exception.  should some or all exceptions cause
 #   the job to be terminated?
 #
@@ -80,6 +85,7 @@ import xmlrpclib
 import ConfigParser
 import sets
 import signal
+import thread
 from threading import Thread, Lock
 from datetime import timedelta
 import traceback
@@ -117,7 +123,7 @@ def get_cqm_config(option, default):
         value = default
     return value
 
-accounting_logdir = get_cqm_config("log_dir", Cobalt.DEFAULT_LOG_DIRECTORY)
+accounting_logdir = os.path.expandvars(get_cqm_config("log_dir", Cobalt.DEFAULT_LOG_DIRECTORY))
 accounting_logger = logging.getLogger("cqm.accounting")
 accounting_logger.addHandler(
     accounting.DatetimeFileHandler(os.path.join(accounting_logdir, "%Y%m%d")))
@@ -521,6 +527,7 @@ class Job (StateMachine):
         self.__admin_hold = False
         self.__user_hold = False
 
+        self.__resource_nodects = []
         self.__timers = dict(
             queue = Timer(),
             current_queue = Timer(),
@@ -544,7 +551,9 @@ class Job (StateMachine):
     def __getstate__(self):
         data = {}
         for key, value in self.__dict__.iteritems():
-            if key not in ['log', 'comms', 'acctlog']:
+            # FIXME: seas and terminal_actions really need to be pickled, but cPickle on the BG login nodes refuses to pickle
+            # instance methods.  what's odd is the same version of python on the Mac pickles these attributes without error.
+            if key not in ['log', 'comms', 'acctlog', '_StateMachine__seas', '_StateMachine__terminal_actions']:
                 data[key] = value
         return data
 
@@ -600,6 +609,7 @@ class Job (StateMachine):
                 'stderr':self.errorpath,
                 'cobalt_log_file':self.cobalt_log_file,
                 'size':self.procs,
+                'nodect':"*",
                 'mode':self.mode,
                 'cwd':self.outputdir,
                 'executable':self.command,
@@ -613,14 +623,19 @@ class Job (StateMachine):
             }])
             if pgroup[0].has_key('id'):
                 self.taskid = pgroup[0]['id']
+                if pgroup[0].has_key('nodect') and pgroup[0]['nodect'] != None:
+                    self.__resource_nodects.append(pgroup[0]['nodect'])
+                else:
+                    self.__resource_nodects.append(self.nodes)
             else:
-                self.__sm_log_error("process group creation failed")
+                self.__sm_log_error("process group creation failed", cobalt_log = True)
                 return Job.__rc_pg_create
         except (ComponentLookupError, xmlrpclib.Fault), e:
-            self.__sm_log_warn("failed to start execution of the user's task (%s); retry pending" % (e,))
+            self.__sm_log_warn("failed to execute the task (%s); retry pending" % (e,))
             return Job.__rc_retry
         except:
-            self.__sm_raise_exception("unexpected error returned from the system component when attempting to add task")
+            self.__sm_raise_exception("unexpected error returned from the system component when attempting to add task",
+                cobalt_log = True)
             return Job.__rc_unknown
 
         return Job.__rc_success
@@ -975,14 +990,14 @@ class Job (StateMachine):
             else:
                 mserver = mailserver
             subj = 'Cobalt: Job %s/%s starting - %s/%s' % (self.jobid, self.user, self.queue, self.location[0])
-            mmsg = "Job %s/%s starting on partition %s, in the '%s' queue , at %s" % \
+            mmsg = "Job %s/%s starting on partition %s, in the '%s' queue, at %s" % \
                 (self.jobid, self.user, self.location[0], self.queue, time.strftime('%c', time.localtime()))
             toaddr = []
             if self.adminemail:
                 toaddr = toaddr + self.adminemail.split(':')
             if self.notify:
                 toaddr = toaddr + self.notify.split(':')
-            thread.start_new_thread(Cobalt.Util.sendemail, toaddr, subj, mmsg, smtpserver = mserver)
+            thread.start_new_thread(Cobalt.Util.sendemail, (toaddr, subj, mmsg), {'smtpserver':mserver})
 
         # set the output and error filenames (BRT: why is this not done in __init__?)
         if not self.outputpath:
@@ -991,8 +1006,7 @@ class Job (StateMachine):
             self.errorpath = "%s/%s.error" % (self.outputdir, self.jobid)
 
         # add the cobolt job id to the list of environment variables
-        if 'COBALT_JOBID' not in self.envs:
-            self.envs['COBALT_JOBID'] = str(self.jobid)
+        self.envs['COBALT_JOBID'] = str(self.jobid)
 
         # start job and resource prologue scripts
         job_scripts = get_cqm_config('job_prescripts', "").split(':')
@@ -1666,7 +1680,7 @@ class Job (StateMachine):
                 toaddr = toaddr + self.adminemail.split(':')
             if self.notify:
                 toaddr = toaddr + self.notify.split(':')
-            thread.start_new_thread(Cobalt.Util.sendemail, toaddr, subj, mmsg, smtpserver = mserver)
+            thread.start_new_thread(Cobalt.Util.sendemail, (toaddr, subj, mmsg), {'smtpserver':mserver})
 
         # write end of job information to CQM and accounting logs
         used_time = int(self.__timers['user'].elapsed_time) * len(self.location)
@@ -1688,8 +1702,8 @@ class Job (StateMachine):
             {'ncpus':self.procs, 'nodect':self.nodes,
                 'walltime':timedelta(minutes=int(self.walltime))},
             "unknown", self.end, exit_status,
-            {'walltime':
-                timedelta(seconds=self.__timers['user'].elapsed_time)},
+            {'walltime':timedelta(seconds=self.__timers['user'].elapsed_time),
+             'nodect':":".join([str(n) for n in self.__resource_nodects])},
             **optional))
         
         logger.info("Job %s/%s on %s nodes done. %s" % (self.jobid, self.user, self.nodes, stats))
@@ -2013,7 +2027,8 @@ class Job (StateMachine):
                             'walltime':timedelta(minutes=int(self.walltime))},
                         "unknown", self.end, "unknown",
                         {'walltime':
-                            timedelta(seconds=self.__timers['user'].elapsed_time)},
+                            timedelta(seconds=self.__timers['user'].elapsed_time),
+                            'nodect':":".join([str(n) for n in self.__resource_nodects])},
                         **optional))
                     
                     logger.info("Job %s/%s on %s nodes forcibly terminated by user %s. %s" % \

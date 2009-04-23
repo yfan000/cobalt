@@ -4,6 +4,7 @@
 __revision__ = '$Revision$'
 
 import logging
+import os.path
 import sys
 import time
 import math
@@ -761,7 +762,7 @@ class BGSched (Component):
     def define_user_utility_functions(self):
         self.logger.info("building user utility functions")
         self.user_utility_functions.clear()
-        filename = self.config.get("utility_file")
+        filename = os.path.expandvars(self.config.get("utility_file"))
         try:
             f = open(filename)
         except:

@@ -74,7 +74,7 @@ if __name__ == '__main__':
             sys.exit(1)
 
         try:
-            sys_size = int(CP.get('cqm', 'size'))
+            sys_size = int(CP.get('system', 'size'))
         except:
             sys_size = 1024
         if not 0 < nc <= sys_size:
@@ -120,7 +120,7 @@ if __name__ == '__main__':
 
 
     try:
-        sys_type = CP.get('cqm', 'bgtype')
+        sys_type = CP.get('bgsystem', 'bgtype')
     except:
         sys_type = 'bgl'
     if sys_type == 'bgp':

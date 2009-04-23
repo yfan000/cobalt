@@ -121,8 +121,9 @@ class ClusterBaseSystem (Component):
         # spec has {nodes, walltime*, procs, mode, kernel}
         
         max_nodes = len(self.all_nodes)
+        # FIXME: is bgtype really needed for clusters?
         try:
-            sys_type = CP.get('cqm', 'bgtype')
+            sys_type = CP.get('bgsystem', 'bgtype')
         except:
             sys_type = 'bgl'
         if sys_type == 'bgp':

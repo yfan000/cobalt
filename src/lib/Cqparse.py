@@ -16,6 +16,7 @@ __revision__ = '$Revision$'
 
 import datetime
 import os
+import os.path
 import re
 import logging
 import time
@@ -37,7 +38,7 @@ import Cobalt.Logging
 CP = ConfigParser.ConfigParser()
 CP.read(Cobalt.CONFIG_FILES)
 try:
-    DEFAULT_LOG_DIRECTORY = CP.get('cqm', 'log_dir')
+    DEFAULT_LOG_DIRECTORY = os.path.expandvars(CP.get('cqm', 'log_dir'))
 except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
     DEFAULT_LOG_DIRECTORY = Cobalt.DEFAULT_LOG_DIRECTORY
 

@@ -134,7 +134,7 @@ class PartitionDict (DataDict):
 class ProcessGroup (Data):
     required_fields = ['jobid', 'user', 'executable', 'args', 'location', 'size', 'cwd']
     fields = Data.fields + [
-        "id", "jobid", "user", "size", "cwd", "executable", "env", "args", "location",
+        "id", "jobid", "user", "size", "nodect", "cwd", "executable", "env", "args", "location",
         "head_pid", "stdin", "stdout", "stderr", "exit_status", "state",
         "mode", "kernel", "kerneloptions", "true_mpi_args",
     ]
@@ -156,8 +156,10 @@ class ProcessGroup (Data):
         self.executable = spec.get('executable')
         self.cwd = spec.get('cwd')
         self.size = spec.get('size')
+        self.nodect = None
         self.mode = spec.get('mode', 'co')
         self.args = " ".join(spec.get('args') or [])
+        self.kernel = spec.get('kernel')
         self.kerneloptions = spec.get('kerneloptions')
         self.env = spec.get('env') or {}
         self.true_mpi_args = spec.get('true_mpi_args')
@@ -343,7 +345,7 @@ class BGBaseSystem (Component):
         
         max_nodes = max([int(p.size) for p in self._partitions.values()])
         try:
-            sys_type = CP.get('cqm', 'bgtype')
+            sys_type = CP.get('bgsystem', 'bgtype')
         except:
             sys_type = 'bgl'
         if sys_type == 'bgp':
@@ -598,7 +600,8 @@ class BGBaseSystem (Component):
         except:
             self.logger.error("error in copy.deepcopy", exc_info=True)
             return {}
-        self._partitions_lock.release()
+        finally:
+            self._partitions_lock.release()
 
             
         # first, figure out backfilling cutoffs per partition (which we'll also use for picking which partition to drain)

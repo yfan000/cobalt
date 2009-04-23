@@ -6,6 +6,7 @@ __all__ = ["Component", "exposed", "automatic", "run_component"]
 
 import inspect
 import os
+import os.path
 import cPickle
 import ConfigParser
 import pydoc
@@ -32,7 +33,7 @@ def state_file_location():
     else:
         _config.read(Cobalt.CONFIG_FILES)
     if _config._sections.has_key("statefiles"):
-        state_dir = _config._sections['statefiles'].get("location", "/var/spool/cobalt")
+        state_dir = os.path.expandvars(_config._sections['statefiles'].get("location", "/var/spool/cobalt"))
     else:
         state_dir = "/var/spool/cobalt"
 
@@ -66,7 +67,7 @@ def run_component (component_cls, argv=None, register=True, state_name=False,
     
     logging.getLogger().setLevel(level)
     Cobalt.Logging.log_to_stderr(logging.getLogger())
-    Cobalt.Logging.setup_logging(component_cls.implementation, True, True)
+    Cobalt.Logging.setup_logging(component_cls.implementation)
 
     if daemon:
         child_pid = os.fork()
@@ -105,7 +106,7 @@ def run_component (component_cls, argv=None, register=True, state_name=False,
     try:
         cp = ConfigParser.ConfigParser()
         cp.read([Cobalt.CONFIG_FILES[0]])
-        keypath = cp.get('communication', 'key')
+        keypath = os.path.expandvars(cp.get('communication', 'key'))
     except:
         keypath = '/etc/cobalt.key'
 

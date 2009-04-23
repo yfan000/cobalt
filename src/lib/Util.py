@@ -8,6 +8,7 @@ import socket
 import sys
 import time
 import ConfigParser
+import os.path
 import popen2
 from datetime import date, datetime
 from getopt import getopt, GetoptError
@@ -247,7 +248,7 @@ def sendemail(toaddr, subj, msg, smtpserver = 'localhost'):
     
 def runcommand(cmd):
     '''Execute command, returning rc, stdout, stderr'''
-    cmdp = popen2.Popen3(cmd, True)
+    cmdp = popen2.Popen3(os.path.expandvars(cmd), True)
     out = []
     err = []
     status = cmdp.wait()
@@ -260,7 +261,7 @@ class AccountingLog:
         CP = ConfigParser.ConfigParser()
         CP.read(Cobalt.CONFIG_FILES)
         try:
-            self.logdir = CP.get('cqm', 'log_dir')
+            self.logdir = os.path.expandvars(CP.get('cqm', 'log_dir'))
         except ConfigParser.NoOptionError:
             self.logdir = Cobalt.DEFAULT_LOG_DIRECTORY
         self.date = None
