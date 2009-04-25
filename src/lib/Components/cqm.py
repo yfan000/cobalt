@@ -7,11 +7,6 @@ __revision__ = '$Revision$'
 #
 # TODO:
 #
-# - remove _StateMachine__seas and _StateMachine__terminal_action from the list of items not to be pickled.  for some reason
-#   python 2.5.1 on the machine pickles these just fine, but the same version of python on the BG login nodes does not.  without
-#   these attributes, the state machine will fail with a nonexistent event when the job is restored, but if they are included
-#   state will not be saved if a job is present in any of the queues.
-#
 # - modify progress routine to catch exceptions and report them using __sm_log_exception.  should some or all exceptions cause
 #   the job to be terminated?
 #
@@ -551,8 +546,6 @@ class Job (StateMachine):
     def __getstate__(self):
         data = {}
         for key, value in self.__dict__.iteritems():
-            # FIXME: seas and terminal_actions really need to be pickled, but cPickle on the BG login nodes refuses to pickle
-            # instance methods.  what's odd is the same version of python on the Mac pickles these attributes without error.
             if key not in ['log', 'comms', 'acctlog']:
                 data[key] = value
         return data
