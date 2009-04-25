@@ -553,7 +553,7 @@ class Job (StateMachine):
         for key, value in self.__dict__.iteritems():
             # FIXME: seas and terminal_actions really need to be pickled, but cPickle on the BG login nodes refuses to pickle
             # instance methods.  what's odd is the same version of python on the Mac pickles these attributes without error.
-            if key not in ['log', 'comms', 'acctlog', '_StateMachine__seas', '_StateMachine__terminal_actions']:
+            if key not in ['log', 'comms', 'acctlog']:
                 data[key] = value
         return data
 

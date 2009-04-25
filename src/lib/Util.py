@@ -1,6 +1,8 @@
 '''Utility funtions for Cobalt programs'''
 __revision__ = '$Revision$'
 
+import copy_reg
+import cPickle
 import os
 import types
 import smtplib
@@ -415,7 +417,7 @@ def getattrname(clsname, attrname):
     if attrname[0:2] != "__" or attrname[-2:] == "__":
         return attrname
     else:
-        return "_" + clsname + attrname
+        return "_" + clsname.lstrip("_") + attrname
 
 class ClassInfoMetaclass (type):
     '''when a class is created, add private attributes to the class that contain a reference to the class and the class name'''
@@ -424,26 +426,30 @@ class ClassInfoMetaclass (type):
         setattr(cls, getattrname(name, "__cls"), cls)
         setattr(cls, getattrname(name, "__clsname"), name)
 
-_class_list_map = {}
-
-def _get_class_list(cls):
-    '''
-    return a list of the classes used to construct the supplied class.  the list is ordered such that a base class will always
-    appear before classes derived from that base class.
-    '''
-    try:
-        return _class_list_map[cls]
-    except KeyError:
-        classes = []
-        classtree = inspect.getclasstree([cls], True)
-        if len(classtree) > 1:
-            for superclass, super2classes in classtree[0::2]:
-                for sc in _get_class_list(superclass):
-                    if sc not in classes:
-                        classes.append(sc)
-        classes.append(cls)
-        _class_list_map[cls] = classes
-        return classes
+#
+# NOTE: replaced by type.mro().  the desired order as stated below is obtained using <type>.mro()[::-1].
+#
+# _class_list_map = {}
+# 
+# def _get_class_list(cls):
+#     '''
+#     return a list of the classes used to construct the supplied class.  the list is ordered such that a base class will always
+#     appear before classes derived from that base class.
+#     '''
+#     try:
+#         return _class_list_map[cls]
+#     except KeyError:
+#         classes = []
+#         classtree = inspect.getclasstree([cls], True)
+#         if len(classtree) > 1:
+#             for superclass, super2classes in classtree[0::2]:
+#                 for sc in _get_class_list(superclass):
+#                     if sc not in classes:
+#                         classes.append(sc)
+#         classes.append(cls)
+#         _class_list_map[cls] = classes
+#         return classes
+#
 
 
 _class_pickle_methods_map = {}
@@ -454,7 +460,7 @@ def _get_pickle_method_list(cls):
         return _class_pickle_methods_map[cls]
     except KeyError:
         methods = []
-        for cls in _get_class_list(cls):
+        for cls in cls.mro():
             method = getattr(cls, getattrname(cls.__name__, "__pickle_data"), None)
             if method and callable(method):
                 methods.append(method)
@@ -466,7 +472,7 @@ def _get_unpickle_method_list(cls):
         return _class_unpickle_methods_map[cls]
     except KeyError:
         methods = []
-        for cls in _get_class_list(cls):
+        for cls in cls.mro()[::-1]:
             method = getattr(cls, getattrname(cls.__name__, "__unpickle_data"), None)
             if method and callable(method):
                 methods.append(method)
@@ -560,3 +566,39 @@ class PickleAwareThread (object):
         assert not self.__started, "cannot set daemon status of active thread"
         self.__thread.setDaemon(daemonic)
         self.is_daemon = daemonic
+
+
+# routines to pickle and unpickle class and instance methods.  the routines are registered with copy_reg so that cPickle will use
+# them whenever it encounters a method type.
+_method_class_map = {}
+
+def _pickle_method(method):
+    func_name = method.im_func.__name__
+    obj = method.im_self
+    cls = method.im_class
+    if cls == types.TypeType:
+        cls = obj
+        obj = None
+    try:
+        func_cls = _method_class_map[method]
+    except KeyError:
+        found = False
+        for func_cls in cls.mro():
+            try:
+                func = func_cls.__dict__[getattrname(func_cls.__name__, func_name)]
+            except KeyError:
+                pass
+            else:
+                if method.im_func == func.__get__(obj, cls).im_func:
+                    _method_class_map[method] = func_cls
+                    found = True
+                    break
+        assert found == True, "method was not found!"
+    func_name = getattrname(func_cls.__name__, func_name)
+    return _unpickle_method, (func_name, func_cls, obj, cls)
+
+def _unpickle_method(func_name, func_cls, obj, cls):
+    func = func_cls.__dict__[func_name]
+    return func.__get__(obj, cls)
+
+copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
