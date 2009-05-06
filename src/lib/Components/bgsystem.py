@@ -28,7 +28,7 @@ from Cobalt.Components import bg_base_system
 from Cobalt.Components.base import Component, exposed, automatic, query
 import Cobalt.bridge
 from Cobalt.bridge import BridgeException
-from Cobalt.Exceptions import ProcessGroupCreationError
+from Cobalt.Exceptions import ProcessGroupCreationError, ComponentLookupError
 from Cobalt.Components.bg_base_system import NodeCard, PartitionDict, ProcessGroupDict, BGBaseSystem, JobValidationError
 from Cobalt.Proxy import ComponentProxy
 from Cobalt.Statistics import Statistics
@@ -203,6 +203,7 @@ class BGSystem (BGBaseSystem):
 
     def __init__ (self, *args, **kwargs):
         BGBaseSystem.__init__(self, *args, **kwargs)
+        sys.setrecursionlimit(5000)
         self.process_groups.item_cls = ProcessGroup
         self.diag_pids = dict()
         self.configure()
@@ -226,6 +227,7 @@ class BGSystem (BGBaseSystem):
                 'partition_flags': flags}
     
     def __setstate__(self, state):
+        sys.setrecursionlimit(5000)
         self._managed_partitions = state['managed_partitions']
         self._partitions = PartitionDict()
         self.process_groups = ProcessGroupDict()
