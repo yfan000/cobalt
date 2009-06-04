@@ -983,8 +983,9 @@ class Job (StateMachine):
             else:
                 mserver = mailserver
             subj = 'Cobalt: Job %s/%s starting - %s/%s' % (self.jobid, self.user, self.queue, self.location[0])
-            mmsg = "Job %s/%s starting on partition %s, in the '%s' queue, at %s" % \
-                (self.jobid, self.user, self.location[0], self.queue, time.strftime('%c', time.localtime()))
+            mmsg = "Job %s/%s starting on partition %s, in the '%s' queue, at %s\nJobName: %s\nCWD: %s\nCommand: %s\nArgs: %s\nProject: %s\nWallTime: %s\nSubmitTime: %s" % \
+                (self.jobid, self.user, self.location[0], self.queue, time.strftime('%c', time.localtime()), self.jobname, self.cwd, self.command, 
+                 self.args, self.project, timedelta(minutes=int(self.walltime)), time.ctime(self.submittime),)
             toaddr = []
             if self.adminemail:
                 toaddr = toaddr + self.adminemail.split(':')
@@ -1666,8 +1667,9 @@ class Job (StateMachine):
             else:
                 mserver = mailserver
             subj = 'Cobalt: Job %s/%s finished - %s/%s %s' % (self.jobid, self.user, self.queue, self.location[0], stats)
-            mmsg = "Job %s/%s finished on partition %s, in the '%s' queue, at %s\nStats: %s" %  (self.jobid, self.user, \
-                self.location[0], self.queue, time.strftime('%c', time.localtime()), stats)
+            mmsg = "Job %s/%s finished on partition %s, in the '%s' queue, at %s\nStats: %s\nJobName: %s\nCWD: %s\nCommand: %s\nArgs: %s\nProject: %s\nWallTime: %s\nSubmitTime: %s" %  (self.jobid, self.user, \
+                self.location[0], self.queue, time.strftime('%c', time.localtime()), stats, 
+                   self.jobname, self.cwd, self.command, self.args, self.project, timedelta(minutes=self.walltime), time.ctime(self.submittime),)
             toaddr = []
             if self.adminemail:
                 toaddr = toaddr + self.adminemail.split(':')
