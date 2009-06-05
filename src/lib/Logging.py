@@ -127,7 +127,7 @@ class TermiosFormatter(logging.Formatter):
         returns = []
         line_len = self.width
         if type(record.msg) in types.StringTypes:
-            for line in record.msg.split('\n'):
+            for line in record.getMessage().split('\n'):
                 if len(line) <= line_len:
                     returns.append(line)
                 else:
@@ -137,20 +137,22 @@ class TermiosFormatter(logging.Formatter):
         elif type(record.msg) == types.ListType:
             if not record.msg:
                 return ''
-            record.msg.sort()
+            # getMessage() must be called so that arguments are substituted; eval() is used to turn the string back into a list
+            msgdata = eval(record.getMessage())
+            msgdata.sort()
             msgwidth = self.width
-            columnWidth = max([len(item) for item in record.msg])
+            columnWidth = max([len(str(item)) for item in msgdata])
             columns = int(math.floor(float(msgwidth) / (columnWidth+2)))
-            lines = int(math.ceil(float(len(record.msg)) / columns))
+            lines = int(math.ceil(float(len(msgdata)) / columns))
             for lineNumber in xrange(lines):
                 indices = [idx for idx in [(colNum * lines) + lineNumber
-                                           for colNum in range(columns)] if idx < len(record.msg)]
+                                           for colNum in range(columns)] if idx < len(msgdata)]
                 format = (len(indices) * (" %%-%ds " % columnWidth))
-                returns.append(format % tuple([record.msg[idx] for idx in indices]))
+                returns.append(format % tuple([msgdata[idx] for idx in indices]))
         #elif type(record.msg) == lxml.etree._Element:
         #    returns.append(str(xml_print(record.msg)))
         else:
-            returns.append(str(record.msg))
+            returns.append(str(record.getMessage()))
         if record.exc_info:
             returns.append(self.formatException(record.exc_info))
         return '\n'.join(returns)
@@ -165,14 +167,15 @@ class FragmentingSysLogHandler(logging.handlers.SysLogHandler):
     def emit(self, record):
         '''chunk and deliver records'''
         record.name = self.procname
-        if str(record.msg) > 250:
+        msgdata = record.getMessage()
+        if len(msgdata) > 250:
             msgs = []
             error = record.exc_info
             record.exc_info = None
-            msgdata = record.msg
             while msgdata:
                 newrec = copy.deepcopy(record)
                 newrec.msg = msgdata[:250]
+                newrec.args = ()
                 msgs.insert(0,newrec)
                 msgdata = msgdata[250:]
             msgs[0].exc_info = error

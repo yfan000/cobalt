@@ -82,7 +82,6 @@ import sets
 import signal
 import thread
 from threading import Thread, Lock
-from datetime import timedelta
 import traceback
 
 import Cobalt
@@ -122,6 +121,9 @@ accounting_logdir = os.path.expandvars(get_cqm_config("log_dir", Cobalt.DEFAULT_
 accounting_logger = logging.getLogger("cqm.accounting")
 accounting_logger.addHandler(
     accounting.DatetimeFileHandler(os.path.join(accounting_logdir, "%Y%m%d")))
+
+def str_elapsed_time(elapsed_time):
+    return "%d:%02d:%02d" % (elapsed_time / 3600, elapsed_time / 60 % 60, elapsed_time % 60)
 
 def has_private_attr(obj, attr):
     assert attr[0:2] == "__"
@@ -278,7 +280,7 @@ class Job (StateMachine):
     qtime = property(lambda self:
         self.__timers['current_queue'].start_times[0])
     start = property(lambda self: self.__timers['user'].start_times[-1])
-    exec_host = property(lambda self: ":".join(self.location))
+    exec_host = property(lambda self: ":".join(self.__locations[-1]))
     end = property(lambda self: self.__timers['user'].stop_times[-1])
     
     fields = Data.fields + [
@@ -294,6 +296,7 @@ class Job (StateMachine):
         'Ready',
         'Hold',
         'Prologue',
+        'Release_Resources_Retry',
         'Run_Retry',
         'Running',
         'Kill_Retry',
@@ -309,57 +312,60 @@ class Job (StateMachine):
         'Job_Epilogue',
         ] + StateMachine._states
     _transitions = [
-        ('Ready', 'Hold'),                              # user/admin hold
-        ('Ready', 'Prologue'),                          # run
-        ('Ready', 'Terminal'),                          # kill
-        ('Hold', 'Ready'),                              # user/admin release, no holds
-        ('Hold', 'Terminal'),                           # kill
-        ('Prologue', 'Run_Retry'),                      # prologue scripts complete; error contacting system component
-        ('Prologue', 'Running'),                        # prologue scripts complete; system component starting task
-        ('Prologue', 'Resource_Epilogue'),              # kill pending
-        ('Run_Retry', 'Running'),                       # system component starting task
-        ('Run_Retry', 'Resource_Epilogue'),             # kill
-        ('Running', 'Kill_Retry'),                      # kill; error contacting system component
-        ('Running', 'Killing'),                         # kill; system component signaling task
-        ('Running', 'Preempt_Retry'),                   # preempt; error contacting system component
-        ('Running', 'Preempting'),                      # preempt; system component signaling task
-        ('Running', 'Finalize_Retry'),                  # task execution complete; error finalizing task and obtaining exit status
-        ('Running', 'Resource_Epilogue'),               # task execution complete; task finalized and exit status obtained
-        ('Kill_Retry', 'Kill_Retry'),                   # handle multiple task signaling failures
-        ('Kill_Retry', 'Killing'),                      # system component signaling task
-        ('Kill_Retry', 'Finalize_Retry'),               # task execution complete/terminated; task finalization failed
-        ('Kill_Retry', 'Resource_Epilogue'),            # task execution completed/terminated successfully
-        ('Killing', 'Kill_Retry'),                      # new signal, or kill timer expired; error contacting system component
-        ('Killing', 'Killing'),                         # kill timer expired; escalating to a forced kill
-        ('Killing', 'Finalize_Retry'),                  # task execution complete/terminated; task finalization failed
-        ('Killing', 'Resource_Epilogue'),               # task execution complete/terminated; task finalization successful
-        ('Preempt_Retry', 'Kill_Retry'),                # kill; error contacting system component
-        ('Preempt_Retry', 'Killing'),                   # kill; system component signaling task
-        ('Preempt_Retry', 'Preempt_Retry'),             # hasndle multiple task signaling failures
-        ('Preempt_Retry', 'Preempting'),                # system component signaling task
-        ('Preempt_Retry', 'Preempt_Finalize_Retry'),    # task execution terminated, task finalization failed
-        ('Preempt_Retry', 'Preempt_Epilogue'),          # task execution terminated successfully
-        ('Preempt_Retry', 'Finalize_Retry'),            # task execution completed, task finalization failed
-        ('Preempt_Retry', 'Resource_Epilogue'),         # task execution completed successfully
-        ('Preempting', 'Kill_Retry'),                   # kill; new signal, error contacting system component
-        ('Preempting', 'Killing'),                      # kill; new signal and system component signaling task,
-                                                        #     same signal used for preempt, or attempted signal demotion
-        ('Preempting', 'Preempting'),                   # preemption timer expired, escalating to the next signal level
-        ('Preempting', 'Preempt_Retry'),                # preemption timer expired, error contacting system component
-        ('Preempting', 'Preempt_Finalize_Retry'),       # task execution terminated, task finalization failed
-        ('Preempting', 'Preempt_Epilogue'),             # task execution complete/terminated; task finalization successful
-        ('Preempt_Finalize_Retry', 'Preempt_Epilogue'), # task finalization failed successful
-        ('Preempt_Epilogue', 'Preempted'),              # task execution complete/terminated, no holds pending
-        ('Preempt_Epilogue', 'Preempted_Hold'),         # task execution complete/terminated, holds pending
-        ('Preempt_Epilogue', 'Job_Epilogue'),           # task execution complete/terminated, kill pending
-        ('Preempted', 'Prologue'),                      # run
-        ('Preempted', 'Preempted_Hold'),                # user/admin hold
-        ('Preempted', 'Job_Epilogue'),                  # kill
-        ('Preempted_Hold', 'Preempted'),                # user/admin release, no holds
-        ('Preempted_Hold', 'Job_Epilogue'),             # kill
-        ('Finalize_Retry', 'Resource_Epilogue'),        # task finalized and exit status obtained (if applicable)
-        ('Resource_Epilogue', 'Job_Epilogue'),          # resource epilogue scripts complete
-        ('Job_Epilogue', 'Terminal'),                   # job epilogue scripts complete
+        ('Ready', 'Hold'),                                  # user/admin hold
+        ('Ready', 'Prologue'),                              # run
+        ('Ready', 'Terminal'),                              # kill
+        ('Hold', 'Ready'),                                  # user/admin release, no holds
+        ('Hold', 'Terminal'),                               # kill
+        ('Prologue', 'Release_Resources_Retry'),            # kill; error contacting system component to release resource
+        ('Prologue', 'Run_Retry'),                          # prologue scripts complete; error contacting system component
+        ('Prologue', 'Running'),                            # prologue scripts complete; system component starting task
+        ('Prologue', 'Resource_Epilogue'),                  # kill; system component released resource
+        ('Release_Resources_Retry', 'Resource_Epilogue'),   # resource successfully released
+        ('Run_Retry', 'Running'),                           # system component starting task
+        ('Run_Retry', 'Resource_Epilogue'),                 # kill
+        ('Running', 'Kill_Retry'),                          # kill; error contacting system component
+        ('Running', 'Killing'),                             # kill; system component signaling task
+        ('Running', 'Preempt_Retry'),                       # preempt; error contacting system component
+        ('Running', 'Preempting'),                          # preempt; system component signaling task
+        ('Running', 'Finalize_Retry'),                      # task execution complete; error finalizing task and obtaining exit
+                                                            #     status
+        ('Running', 'Resource_Epilogue'),                   # task execution complete; task finalized and exit status obtained
+        ('Kill_Retry', 'Kill_Retry'),                       # handle multiple task signaling failures
+        ('Kill_Retry', 'Killing'),                          # system component signaling task
+        ('Kill_Retry', 'Finalize_Retry'),                   # task execution complete/terminated; task finalization failed
+        ('Kill_Retry', 'Resource_Epilogue'),                # task execution completed/terminated successfully
+        ('Killing', 'Kill_Retry'),                          # new signal, or kill timer expired; error contacting system component
+        ('Killing', 'Killing'),                             # kill timer expired; escalating to a forced kill
+        ('Killing', 'Finalize_Retry'),                      # task execution complete/terminated; task finalization failed
+        ('Killing', 'Resource_Epilogue'),                   # task execution complete/terminated; task finalization successful
+        ('Preempt_Retry', 'Kill_Retry'),                    # kill; error contacting system component
+        ('Preempt_Retry', 'Killing'),                       # kill; system component signaling task
+        ('Preempt_Retry', 'Preempt_Retry'),                 # hasndle multiple task signaling failures
+        ('Preempt_Retry', 'Preempting'),                    # system component signaling task
+        ('Preempt_Retry', 'Preempt_Finalize_Retry'),        # task execution terminated, task finalization failed
+        ('Preempt_Retry', 'Preempt_Epilogue'),              # task execution terminated successfully
+        ('Preempt_Retry', 'Finalize_Retry'),                # task execution completed, task finalization failed
+        ('Preempt_Retry', 'Resource_Epilogue'),             # task execution completed successfully
+        ('Preempting', 'Kill_Retry'),                       # kill; new signal, error contacting system component
+        ('Preempting', 'Killing'),                          # kill; new signal and system component signaling task,
+                                                            #     same signal used for preempt, or attempted signal demotion
+        ('Preempting', 'Preempting'),                       # preemption timer expired, escalating to the next signal level
+        ('Preempting', 'Preempt_Retry'),                    # preemption timer expired, error contacting system component
+        ('Preempting', 'Preempt_Finalize_Retry'),           # task execution terminated, task finalization failed
+        ('Preempting', 'Preempt_Epilogue'),                 # task execution complete/terminated; task finalization successful
+        ('Preempt_Finalize_Retry', 'Preempt_Epilogue'),     # task finalization failed successful
+        ('Preempt_Epilogue', 'Preempted'),                  # task execution complete/terminated, no holds pending
+        ('Preempt_Epilogue', 'Preempted_Hold'),             # task execution complete/terminated, holds pending
+        ('Preempt_Epilogue', 'Job_Epilogue'),               # task execution complete/terminated, kill pending
+        ('Preempted', 'Prologue'),                          # run
+        ('Preempted', 'Preempted_Hold'),                    # user/admin hold
+        ('Preempted', 'Job_Epilogue'),                      # kill
+        ('Preempted_Hold', 'Preempted'),                    # user/admin release, no holds
+        ('Preempted_Hold', 'Job_Epilogue'),                 # kill
+        ('Finalize_Retry', 'Resource_Epilogue'),            # task finalized and exit status obtained (if applicable)
+        ('Resource_Epilogue', 'Job_Epilogue'),              # resource epilogue scripts complete
+        ('Job_Epilogue', 'Terminal'),                       # job epilogue scripts complete
         ]
     _initial_state = 'Ready'
     _events = ['Run', 'Hold', 'Release', 'Preempt', 'Kill', 'Task_End'] + StateMachine._events
@@ -386,6 +392,11 @@ class Job (StateMachine):
             ('Prologue', 'Release') : [self.__sm_common__pending_release],
             ('Prologue', 'Preempt') : [self.__sm_common__pending_preempt],
             ('Prologue', 'Kill') : [self.__sm_common__pending_kill],
+            ('Release_Resources_Retry', 'Progress') : [self.__sm_release_resources_retry__progress],
+            ('Release_Resources_Retry', 'Hold') : [self.__sm_exit_common__hold],
+            ('Release_Resources_Retry', 'Release') : [self.__sm_exit_common__release],
+            ('Release_Resources_Retry', 'Preempt') : [self.__sm_exit_common__preempt],
+            ('Release_Resources_Retry', 'Kill') : [self.__sm_exit_common__kill],
             ('Run_Retry', 'Progress') : [self.__sm_run_retry__progress],
             ('Run_Retry', 'Hold') : [self.__sm_common__pending_hold],
             ('Run_Retry', 'Release') : [self.__sm_common__pending_release],
@@ -484,6 +495,7 @@ class Job (StateMachine):
         self.notify = spec.get("notify")
         self.adminemail = spec.get("adminemail")
         self.location = spec.get("location")
+        self.__locations = []
         self.outputpath = spec.get("outputpath")
         if self.outputpath:
             jname = self.outputpath.split('/')[-1].split('.output')[0]
@@ -608,7 +620,7 @@ class Job (StateMachine):
                 'executable':self.command,
                 'args':self.args,
                 'env':self.envs,
-                'location':[self.location[0]],
+                'location':self.location,
                 'umask':self.umask,
                 'kernel':self.kernel,
                 'kerneloptions':self.kerneloptions,
@@ -650,6 +662,18 @@ class Job (StateMachine):
 
         self.taskid = None
         return Job.__rc_success
+
+    def __release_resources(self):
+        '''release computing resources that may still be reserved by the job'''
+        try:
+            ComponentProxy("system").reserve_resources_until(self.location, None, self.jobid)
+            return Job.__rc_success
+        except (ComponentLookupError, xmlrpclib.Fault), e:
+            self.__sm_log_warn("failed to communicate with the system component (%s); retry pending" % (e,))
+            return Job.__rc_retry
+        except:
+            self.__sm_raise_exception("unexpected error returned from the system component while releasing resources")
+            return Job.__rc_unknown
 
     def __sm_log_debug(self, msg, cobalt_log = False):
         '''write an informational message to the CQM log that includes state machine status'''
@@ -946,6 +970,7 @@ class Job (StateMachine):
         self.starttime = str(time.time())
 
         self.location = args['nodelist']
+        self.__locations.append(self.location)
 
         # write job start and project information to CQM and accounting logs
         if self.reservation:
@@ -971,7 +996,7 @@ class Job (StateMachine):
             "unknown", self.jobname, self.queue, self.ctime, self.qtime,
             self.etime, self.start, self.exec_host,
             {'ncpus':self.procs, 'nodect':self.nodes,
-                'walltime':timedelta(minutes=self.walltime)},
+             'walltime':str_elapsed_time(self.walltime * 60)},
             "unknown"))
 
         # notify the user that the job is starting; a separate thread is used to send the email so that cqm does not block
@@ -983,9 +1008,11 @@ class Job (StateMachine):
             else:
                 mserver = mailserver
             subj = 'Cobalt: Job %s/%s starting - %s/%s' % (self.jobid, self.user, self.queue, self.location[0])
-            mmsg = "Job %s/%s starting on partition %s, in the '%s' queue, at %s\nJobName: %s\nCWD: %s\nCommand: %s\nArgs: %s\nProject: %s\nWallTime: %s\nSubmitTime: %s" % \
-                (self.jobid, self.user, self.location[0], self.queue, time.strftime('%c', time.localtime()), self.jobname, self.cwd, self.command, 
-                 self.args, self.project, timedelta(minutes=int(self.walltime)), time.ctime(self.submittime),)
+            mmsg = ("Job %s/%s, in the '%s' queue, starting at %s.\nJobName: %s\nCWD: %s\nCommand: %s\nArgs: %s\n" + \
+                    "Project: %s\nWallTime: %s\nSubmitTime: %s\nResources allocated: %s") % \
+                    (self.jobid, self.user, self.queue, time.strftime('%c', time.localtime()), self.jobname, self.cwd,
+                     self.command, self.args, self.project, str_elapsed_time(self.walltime), time.ctime(self.submittime),
+                     ":".join(self.location))
             toaddr = []
             if self.adminemail:
                 toaddr = toaddr + self.adminemail.split(':')
@@ -1137,14 +1164,20 @@ class Job (StateMachine):
             return
         self.__sm_log_debug("prologue scripts have completed")
 
-        # if a user delete is pending, then start job cleanup so that it may terminate
+        # if a user delete is pending, then release any resources that have been reserved, and start job cleanup so that it may
+        # terminate
         if has_private_attr(self, '__signaling_info')  and self.__signaling_info.pending and \
                 self.__signaling_info.reason == Signal_Info.Reason.delete:
             self.__signaled_info = self.__signaling_info
             self.__signaled_info.pending = False
             del self.__signaling_info
-            self.__sm_log_info("pending user delete; initiating job cleanup and removal", cobalt_log = True)
-            self.__sm_start_resource_epilogue_scripts()
+            self.__sm_log_info("pending user delete; releasing resources", cobalt_log = True)
+            rc = self.__release_resources()
+            if rc == Job.__rc_success:
+                self.__sm_log_info("resources released; initiating job cleanup and removal", cobalt_log = True)
+                self.__sm_start_resource_epilogue_scripts()
+            else:
+                self.__sm_state = 'Release_Resources_Retry'
             return
             
         # attempt to run task
@@ -1157,6 +1190,13 @@ class Job (StateMachine):
         else:
             # if the task failed to run, then proceed with job termination by starting the resource prologue scripts
             self.__sm_log_error("execution failure; initiating job cleanup and removal", cobalt_log = True)
+            self.__sm_start_resource_epilogue_scripts()
+
+    def __sm_release_resources_retry__progress(self, args):
+        self.__sm_log_info("retrying release of resources")
+        rc = self.__release_resources()
+        if rc == Job.__rc_success:
+            self.__sm_log_info("resources released; initiating job cleanup and removal", cobalt_log = True)
             self.__sm_start_resource_epilogue_scripts()
 
     def __sm_run_retry__progress(self, args):
@@ -1470,9 +1510,10 @@ class Job (StateMachine):
             self.__sm_start_job_epilogue_scripts()
             return
             
-        # stop the execution timer and output accounting log entry
+        # stop the execution timer, clear the location where the job is being run, and output accounting log entry
         self.__timers['user'].stop()
         self.__max_job_timer.stop()
+        self.location = None
         if self.__max_job_timer.has_expired:
             # if the job execution time has exceeded the wallclock time, then proceed to cleanup and remove the job
             self.__sm_log_info("maximum execution time exceeded; initiating job cleanup and removal", cobalt_log = True)
@@ -1525,6 +1566,7 @@ class Job (StateMachine):
 
         # set the list of resources being used
         self.location = args['nodelist']
+        self.__locations.append(self.location)
 
         # write job restart and project information to CQM and accounting logs
         if self.reservation:
@@ -1550,7 +1592,7 @@ class Job (StateMachine):
             "unknown", self.jobname, self.queue, self.ctime, self.qtime,
             self.etime, self.start, self.exec_host,
             {'ncpus':self.procs, 'nodect':self.nodes,
-                'walltime':timedelta(minutes=self.walltime)},
+             'walltime':str_elapsed_time(self.walltime * 60)},
             "unknown"))
 
         # start resource prologue scripts
@@ -1667,9 +1709,11 @@ class Job (StateMachine):
             else:
                 mserver = mailserver
             subj = 'Cobalt: Job %s/%s finished - %s/%s %s' % (self.jobid, self.user, self.queue, self.location[0], stats)
-            mmsg = "Job %s/%s finished on partition %s, in the '%s' queue, at %s\nStats: %s\nJobName: %s\nCWD: %s\nCommand: %s\nArgs: %s\nProject: %s\nWallTime: %s\nSubmitTime: %s" %  (self.jobid, self.user, \
-                self.location[0], self.queue, time.strftime('%c', time.localtime()), stats, 
-                   self.jobname, self.cwd, self.command, self.args, self.project, timedelta(minutes=self.walltime), time.ctime(self.submittime),)
+            mmsg = ("Job %s/%s, in the '%s' queue, finished at %s\nStats: %s\nJobName: %s\nCWD: %s\nCommand: %s\nArgs: %s\n" + \
+                    "Project: %s\nWallTime: %s\nSubmitTime: %s\nExit code: %s\nResources used: %s") % \
+                    (self.jobid, self.user, self.queue, time.strftime('%c', time.localtime()), stats, self.jobname, self.cwd,
+                     self.command, self.args, self.project, str_elapsed_time(self.walltime), time.ctime(self.submittime),
+                     self.exit_status, ":".join(self.location))
             toaddr = []
             if self.adminemail:
                 toaddr = toaddr + self.adminemail.split(':')
@@ -1678,7 +1722,9 @@ class Job (StateMachine):
             thread.start_new_thread(Cobalt.Util.sendemail, (toaddr, subj, mmsg), {'smtpserver':mserver})
 
         # write end of job information to CQM and accounting logs
-        used_time = int(self.__timers['user'].elapsed_time) * len(self.location)
+        used_time = 0
+        for index in xrange(len(self.__locations)):
+            used_time += int(self.__timers['user'].elapsed_times[index]) * len(self.__locations[index])
         logger.info('E;%s;%s;%s' % (self.jobid, self.user, str(used_time)))
         self.acctlog.LogMessage('E;%s;%s;%s' % (self.jobid, self.user, str(used_time)))
         self.endtime = str(time.time())
@@ -1695,10 +1741,11 @@ class Job (StateMachine):
             "unknown", self.jobname, self.queue, self.ctime, self.qtime,
             self.etime, self.start, self.exec_host,
             {'ncpus':self.procs, 'nodect':self.nodes,
-                'walltime':timedelta(minutes=int(self.walltime))},
+             'walltime':str_elapsed_time(self.walltime * 60)},
             "unknown", self.end, exit_status,
-            {'walltime':timedelta(seconds=self.__timers['user'].elapsed_time),
-             'nodect':":".join([str(n) for n in self.__resource_nodects])},
+            {'location':",".join([":".join(l) for l in self.__locations]),
+             'nodect':",".join([str(n) for n in self.__resource_nodects]),
+             'walltime':",".join([str_elapsed_time(t) for t in self.__timers['user'].elapsed_times])},
             **optional))
         
         logger.info("Job %s/%s on %s nodes done. %s" % (self.jobid, self.user, self.nodes, stats))
@@ -1751,7 +1798,11 @@ class Job (StateMachine):
         return self.__walltime
 
     def __set_walltime(self, walltime):
-        # FIXME: does the system component need to be informed of walltime changes???
+        walltime = int(float(walltime))
+        if self.__sm_state == 'Running':
+            remaining_time = walltime - int(self.__timers['user'].elapsed_time) / 60
+            if remaining_time > 0:
+                ComponentProxy("system").reserve_resources_until(self.location, time.time() + remaining_time * 60, self.jobid)
         self.__walltime = int(float(walltime))
         try:
             self.__max_job_timer.max_time = walltime * 60
@@ -1811,7 +1862,7 @@ class Job (StateMachine):
             return 'preempting'
         if self.__sm_state == 'Preempted':
             return 'preempted'
-        if self.__sm_state in ['Finalize_Retry', 'Resource_Epilogue', 'Job_Epilogue']:
+        if self.__sm_state in ['Release_Resources_Retry', 'Finalize_Retry', 'Resource_Epilogue', 'Job_Epilogue']:
             return "exiting"
         if self.__sm_state == 'Terminal':
             return "done"
@@ -1832,7 +1883,7 @@ class Job (StateMachine):
             return "K"
         if self.__sm_state in ['Preempt_Retry', 'Preempting', 'Preempt_Finalize_Retry', 'Preempt_Epilogue', 'Preempted']:
             return 'P'
-        if self.__sm_state in ['Finalize_Retry', 'Resource_Epilogue', 'Job_Epilogue', 'Terminal']:
+        if self.__sm_state in ['Release_Resources_Retry', 'Finalize_Retry', 'Resource_Epilogue', 'Job_Epilogue', 'Terminal']:
             return 'E'
         raise DataStateError, "unknown state: %s" % (self.__sm_state,)
 
@@ -2006,7 +2057,9 @@ class Job (StateMachine):
                     stats = self.__get_stats()
                     
                     # write end of job information to CQM and accounting logs
-                    used_time = int(self.__timers['user'].elapsed_time) * len(self.location)
+                    used_time = 0
+                    for index in xrange(len(self.__locations)):
+                        used_time += int(self.__timers['user'].elapsed_times[index]) * len(self.__locations[index])
                     logger.info('E;%s;%s;%s' % (self.jobid, self.user, str(used_time)))
                     self.acctlog.LogMessage('E;%s;%s;%s' % (self.jobid, self.user, str(used_time)))
                     self.endtime = str(time.time())
@@ -2019,11 +2072,11 @@ class Job (StateMachine):
                         "unknown", self.jobname, self.queue, self.ctime, self.qtime,
                         self.etime, self.start, self.exec_host,
                         {'ncpus':self.procs, 'nodect':self.nodes,
-                            'walltime':timedelta(minutes=int(self.walltime))},
-                        "unknown", self.end, "unknown",
-                        {'walltime':
-                            timedelta(seconds=self.__timers['user'].elapsed_time),
-                            'nodect':":".join([str(n) for n in self.__resource_nodects])},
+                         'walltime':str_elapsed_time(self.walltime * 60)},
+                         "unknown", self.end, "unknown",
+                        {'location':",".join([":".join(l) for l in self.__locations]),
+                         'nodect':",".join([str(n) for n in self.__resource_nodects]),
+                         'walltime':",".join([str_elapsed_time(t) for t in self.__timers['user'].elapsed_times])},
                         **optional))
                     
                     logger.info("Job %s/%s on %s nodes forcibly terminated by user %s. %s" % \

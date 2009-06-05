@@ -65,6 +65,7 @@ class JobPreemptionError (Exception):
         self.args = (msg, jobid)
         self.msg = msg
         self.jobid = jobid
+        log = False
 
 class DataStateError(Exception):
     log = True

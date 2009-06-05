@@ -411,6 +411,16 @@ class Timer (object):
 
     stop_times = property(__get_stop_times, doc = "list of end times")
 
+    def __get_elapsed_times(self):
+        '''create and return a list of elapsed times'''
+        elapsed_times = []
+        for index in xrange(len(self.__stop_times)):
+            elapsed_times.append(self.__stop_times[index] - self.__start_times[index])
+        if self.is_active:
+            elapsed_times.append(time.time() - self.__start_times[-1])
+        return elapsed_times
+
+    elapsed_times = property(__get_elapsed_times, doc = "list of elapsed times")
 
 def getattrname(clsname, attrname):
     '''return mangled private attribute names so that they may be looked up in the dictionary or using getattr()'''

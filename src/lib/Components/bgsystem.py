@@ -484,7 +484,7 @@ class BGSystem (BGBaseSystem):
 
     def _validate_kernel(self, kernel):
         if self.config.get('kernel') != 'true':
-            return False
+            return True
         kernel_dir = "%s/%s" % (os.path.expandvars(self.config.get('bootprofiles')), kernel)
         return os.path.exists(kernel_dir)
 
@@ -572,8 +572,8 @@ class BGSystem (BGBaseSystem):
                     pgroup = new_pgroup[0]
                     pgroup.nodect = self._partitions[pgroup.location[0]].size
                     pgroup.exit_status = 1
-                    self.logger.info("process group %s: job %s/%s failed to set the kernel; %s" % \
-                            (pgroup.id, pgroup.jobid, pgroup.user, e))
+                    self.logger.info("process group %s: job %s/%s failed to set the kernel; %s", pgroup.id, pgroup.jobid, 
+                        pgroup.user, e)
                 else:
                     try:
                         script_pgroup = ComponentProxy("script-manager").add_jobs([spec])
@@ -583,32 +583,35 @@ class BGSystem (BGBaseSystem):
                         raise ProcessGroupCreationError("system::add_process_groups failed to communicate with script-manager")
                     new_pgroup = self.process_groups.q_add([spec])
                     pgroup = new_pgroup[0]
-                    pgroup.script_id = script_pgroup['id']
+                    pgroup.script_id = script_pgroup[0]['id']
                     pgroup.nodect = self._partitions[pgroup.location[0]].size
-                    self.reserve_partition_until(spec['location'][0], time.time() + 60*float(spec['walltime']), pgroup.id)
+                    self.logger.info("job %s/%s: process group %s created to track script", pgroup.jobid, pgroup.user, pgroup.id)
+                    self.reserve_resources_until(spec['location'], time.time() + 60*float(spec['walltime']), pgroup.jobid)
                     if pgroup.kernel != "default":
-                        self.logger.info("process group %s: job %s/%s using kernel %s" % \
-                            (pgroup.id, pgroup.jobid, pgroup.user, pgroup.kernel))
+                        self.logger.info("process group %s: job %s/%s using kernel %s", pgroup.id, pgroup.jobid, pgroup.user, 
+                            pgroup.kernel)
                     script_pgroups.append(pgroup)
 
         # start up non-script mode jobs
         process_groups = self.process_groups.q_add(other_specs)
         for pgroup in process_groups:
             pgroup.nodect = self._partitions[pgroup.location[0]].size
+            self.logger.info("job %s/%s: process group %s created to track mpirun status", pgroup.jobid, pgroup.user, pgroup.id)
             try:
-                self._set_kernel(pgroup.location[0], pgroup.kernel)
+                if not pgroup.true_mpi_args:
+                    self._set_kernel(pgroup.location[0], pgroup.kernel)
             except Exception, e:
                 # FIXME: setting exit_status to signal the job has failed isn't really the right thing to do.  another flag
                 # should be added to the process group that wait_process_group uses to determine when a process group is no
                 # longer active.  an error message should also be attached to the process group so that cqm can report the
                 # problem to the user.
                 pgroup.exit_status = 1
-                self.logger.info("process group %s: job %s/%s failed to set the kernel; %s" % \
-                    (pgroup.id, pgroup.jobid, pgroup.user, e))
+                self.logger.info("process group %s: job %s/%s failed to set the kernel; %s", pgroup.id, pgroup.jobid, 
+                    pgroup.user, e)
             else:
-                if pgroup.kernel != "default":
-                    self.logger.info("process group %s: job %s/%s using kernel %s" % \
-                        (pgroup.id, pgroup.jobid, pgroup.user, pgroup.kernel))
+                if pgroup.kernel != "default" and not pgroup.true_mpi_args:
+                    self.logger.info("process group %s: job %s/%s using kernel %s", pgroup.id, pgroup.jobid, pgroup.user,
+                        pgroup.kernel)
                 pgroup.start()
             
         return script_pgroups + process_groups

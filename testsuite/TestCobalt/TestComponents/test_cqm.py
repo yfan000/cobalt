@@ -383,13 +383,13 @@ class SimulatedTaskManager (Component):
     def __init__(self, *args, **kwargs):
         Component.__init__(self, *args, **kwargs)
         self.tasks = TaskDict()
-        self.excs = {'add':[], 'signal':[], 'wait':[]}
+        self.excs = {'add':[], 'signal':[], 'wait':[], 'reserve':[]}
         self.ops = []
         self.op_index = 0
         self.__lock = Lock()
         self.__cond = Condition(self.__lock)
 
-    def __raise_pending_exc(self, op_type, specs, *args):
+    def __raise_pending_exc(self, op_type, *args):
         exc = None
         cb = None
         try:
@@ -399,9 +399,9 @@ class SimulatedTaskManager (Component):
         finally:
             self.__lock.release()
         if cb != None:
-            cb(op_type, exc, specs, *args)
+            cb(op_type, exc, *args)
         if exc != None:
-            op = [op_type, exc, specs]
+            op = [op_type, exc]
             op.extend(args)
             self.__op_add(op)
             raise exc
@@ -442,6 +442,10 @@ class SimulatedTaskManager (Component):
         for task in tasks:
             task.exit_status = exit_status
         return tasks
+
+    def reserve_partition_until(self, location, duration, jobid):
+        self.__raise_pending_exc('reserve')
+        self.__op_add(['reserve', None])
 
     def op_wait(self):
         try:
@@ -512,8 +516,8 @@ class SimulatedSystem (SimulatedTaskManager):
 
     signal_process_groups = exposed(query(signal_process_groups))
 
-    def reserve_partition_until(self, location, duration):
-        pass
+    def reserve_partition_until(self, location, duration, jobid):
+        return SimulatedTaskManager.reserve_partition_until(self, location, duration, jobid)
 
     reserve_partition_until = exposed(reserve_partition_until)
 
@@ -741,12 +745,16 @@ class CQMIntegrationTestBase (TestCQMComponent):
         assert self.job['jobid'] == self.jobid, "expected job id to be '%s'; actual job id is '%s'" % \
             (self.jobid, self.job['jobid'])
 
-    def assert_next_task_op(self, op_type, exc_cls = types.NoneType):
+    def assert_next_op(self, op_type, exc_cls = types.NoneType):
         op = self.taskman.op_wait()
         assert op != None, "no operation found"
-        assert op[0] == op_type, "expected op type of '%s'; actual op type is '%s'" % (op[0], op_type)
+        assert op[0] == op_type, "expected op type of '%s'; actual op type is '%s'" % (op_type, op[0])
         exc = op[1]
         assert isinstance(exc, exc_cls), "expected exception type to be '%s'; actual type is '%s'" %  (exc_cls, type(exc))
+        return op
+
+    def assert_next_task_op(self, op_type, exc_cls = types.NoneType):
+        op = self.assert_next_op(op_type, exc_cls)
         if exc_cls == types.NoneType:
             tasks = op[2]
             assert len(tasks) == 1
@@ -1435,7 +1443,41 @@ class CQMIntegrationTestBase (TestCQMComponent):
         # (task_finished is not called by the template).  this will result in the the test hanging in job_finished_wait() until
         # the timeout is reached.
         def _task_run(preempt):
-            pass
+            self.assert_next_op('reserve')
+        self.job_exec_driver(job_pretask = _pretask, task_run = _task_run)
+        self.job_exec_driver(resource_pretask = _pretask, task_run = _task_run)
+
+    @timeout(10)
+    def test_nonpreempt_starting__kill_failed(self):
+        def _pretask():
+            self.assert_job_state("starting")
+            self.taskman.add_exc('reserve', BogusException1("error1"))
+            self.taskman.add_exc('reserve', BogusException2("error2"))
+            self.job_kill()
+        def _task_run(preempt):
+            self.assert_next_op('reserve', BogusException1)
+            self.assert_next_op('reserve', BogusException2)
+            self.assert_next_op('reserve')
+        self.job_exec_driver(job_pretask = _pretask, task_run = _task_run)
+        self.job_exec_driver(resource_pretask = _pretask, task_run = _task_run)
+
+    @timeout(10)
+    def test_nonpreempt_starting__kill_failed__wb(self):
+        def _progress_off(op, exc):
+            assert op == "reserve"
+            self.qm_thr.pause()
+        def _pretask():
+            self.assert_job_state("starting")
+            self.taskman.add_exc('reserve', BogusException1("error1"), _progress_off)
+            self.taskman.add_exc('reserve', BogusException2("error2"))
+            self.job_kill()
+        def _task_run(preempt):
+            self.assert_next_op('reserve', BogusException1)
+            self.qm_thr.pause_wait()
+            self.job_get_state(assert_spec = {'state':"exiting", 'sm_state':"Resource_Release_Retry"})
+            self.qm_thr.resume()
+            self.assert_next_op('reserve', BogusException2)
+            self.assert_next_op('reserve')
         self.job_exec_driver(job_pretask = _pretask, task_run = _task_run)
         self.job_exec_driver(resource_pretask = _pretask, task_run = _task_run)
 
@@ -1629,6 +1671,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
         def _task_active():
             self.job_update({}, {'walltime':new_walltime})
             assert self.job['walltime'] == new_walltime
+            self.assert_next_op('reserve')
             op = self.assert_next_task_op('signal')
             self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Killing"})
             assert op[3] == Signal_Map.terminate
