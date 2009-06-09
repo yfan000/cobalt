@@ -1709,11 +1709,11 @@ class Job (StateMachine):
             else:
                 mserver = mailserver
             subj = 'Cobalt: Job %s/%s finished - %s/%s %s' % (self.jobid, self.user, self.queue, self.location[0], stats)
-            mmsg = ("Job %s/%s, in the '%s' queue, finished at %s\nStats: %s\nJobName: %s\nCWD: %s\nCommand: %s\nArgs: %s\n" + \
-                    "Project: %s\nWallTime: %s\nSubmitTime: %s\nExit code: %s\nResources used: %s") % \
-                    (self.jobid, self.user, self.queue, time.strftime('%c', time.localtime()), stats, self.jobname, self.cwd,
+            mmsg = ("Job %s/%s, in the '%s' queue, finished at %s\nJobName: %s\nCWD: %s\nCommand: %s\nArgs: %s\n" + \
+                    "Project: %s\nWallTime: %s\nSubmitTime: %s\nStats: %s\nExit code: %s\nResources used: %s") % \
+                    (self.jobid, self.user, self.queue, time.strftime('%c', time.localtime()), self.jobname, self.cwd,
                      self.command, self.args, self.project, str_elapsed_time(self.walltime), time.ctime(self.submittime),
-                     self.exit_status, ":".join(self.location))
+                     stats, self.exit_status, ",".join([":".join(l) for l in self.__locations]))
             toaddr = []
             if self.adminemail:
                 toaddr = toaddr + self.adminemail.split(':')

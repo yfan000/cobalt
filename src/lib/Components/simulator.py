@@ -347,7 +347,7 @@ class Simulator (BGBaseSystem):
         script_specs = []
         other_specs = []
         for spec in specs:
-            if spec['mode'] == "script":
+            if spec.get('mode') == "script":
                 script_specs.append(spec)
             else:
                 other_specs.append(spec)

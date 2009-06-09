@@ -656,16 +656,17 @@ class BGSystem (BGBaseSystem):
     def signal_process_groups (self, specs, signame="SIGINT"):
         my_process_groups = self.process_groups.q_get(specs)
         for pg in my_process_groups:
-            if pg.mode == "script":
-                try:
-                    ComponentProxy("script-manager").signal_jobs([{'id':pg.script_id}], signame)
-                except (ComponentLookupError, xmlrpclib.Fault):
-                    self.logger.error("Failed to communicate with script manager when killing job")
-            else:
-                try:
-                    os.kill(int(pg.head_pid), getattr(signal, signame))
-                except OSError, e:
-                    self.logger.error("signal failure for process group %s: %s" % (pg.id, e))
+            if pg.exit_status is not None:
+                if pg.mode == "script":
+                    try:
+                        ComponentProxy("script-manager").signal_jobs([{'id':pg.script_id}], signame)
+                    except (ComponentLookupError, xmlrpclib.Fault):
+                        self.logger.error("Failed to communicate with script manager when killing job")
+                else:
+                    try:
+                        os.kill(int(pg.head_pid), getattr(signal, signame))
+                    except OSError, e:
+                        self.logger.error("signal failure for process group %s: %s" % (pg.id, e))
         return my_process_groups
     signal_process_groups = exposed(query(signal_process_groups))
 

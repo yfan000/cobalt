@@ -443,7 +443,7 @@ class SimulatedTaskManager (Component):
             task.exit_status = exit_status
         return tasks
 
-    def reserve_partition_until(self, location, duration, jobid):
+    def reserve_resources_until(self, location, duration, jobid):
         self.__raise_pending_exc('reserve')
         self.__op_add(['reserve', None])
 
@@ -516,10 +516,10 @@ class SimulatedSystem (SimulatedTaskManager):
 
     signal_process_groups = exposed(query(signal_process_groups))
 
-    def reserve_partition_until(self, location, duration, jobid):
-        return SimulatedTaskManager.reserve_partition_until(self, location, duration, jobid)
+    def reserve_resources_until(self, location, duration, jobid):
+        return SimulatedTaskManager.reserve_resources_until(self, location, duration, jobid)
 
-    reserve_partition_until = exposed(reserve_partition_until)
+    reserve_resources_until = exposed(reserve_resources_until)
 
 class ScriptTask (Task):
     fields = Task.fields + ["name", "inputfile", "outputfile", "errorfile", "path", ]
@@ -1474,7 +1474,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
         def _task_run(preempt):
             self.assert_next_op('reserve', BogusException1)
             self.qm_thr.pause_wait()
-            self.job_get_state(assert_spec = {'state':"exiting", 'sm_state':"Resource_Release_Retry"})
+            self.job_get_state(assert_spec = {'state':"exiting", 'sm_state':"Release_Resources_Retry"})
             self.qm_thr.resume()
             self.assert_next_op('reserve', BogusException2)
             self.assert_next_op('reserve')
@@ -1602,16 +1602,16 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert op == "signal"
             self.qm_thr.pause()
         def _task_active():
-            self.taskman.add_exc('signal', BogusException1("error1"), _progress_off)
-            self.taskman.add_exc('signal', BogusException2("error2"),)
+            self.taskman.add_exc('signal', BogusException1("error1"))
+            self.taskman.add_exc('signal', BogusException2("error2"), _progress_off)
             self.job_kill()
             op = self.assert_next_task_op('signal', BogusException1)
             assert op[3] == Signal_Map.terminate
             self.qm_thr.pause_wait()
-            self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Kill_Retry"})
-            self.qm_thr.resume()
             op = self.assert_next_task_op('signal', BogusException2)
             assert op[3] == Signal_Map.terminate
+            self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Kill_Retry"})
+            self.qm_thr.resume()
             op = self.assert_next_task_op('signal')
             assert op[3] == Signal_Map.terminate
         self.job_exec_driver(task_active = _task_active)
@@ -1646,14 +1646,14 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert op == "wait"
             self.qm_thr.pause()
         def _task_complete():
-            self.taskman.add_exc('wait', BogusException1("error1"), _progress_off)
-            self.taskman.add_exc('wait', BogusException2("error2"))
+            self.taskman.add_exc('wait', BogusException1("error1"))
+            self.taskman.add_exc('wait', BogusException2("error2"), _progress_off)
             self.task_finished(0)
             self.assert_next_task_op('wait', BogusException1)
             self.qm_thr.pause_wait()
+            self.assert_next_task_op('wait', BogusException2)
             self.job_get_state(assert_spec = {'state':"exiting", 'sm_state':"Finalize_Retry"})
             self.qm_thr.resume()
-            self.assert_next_task_op('wait', BogusException2)
             self.assert_next_task_op('wait')
         self.job_exec_driver(task_complete = _task_complete)
 
@@ -1814,11 +1814,14 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert signame == "SIGUSR2"
             self.qm_thr.pause()
         def _task_active():
-            self.taskman.add_exc('signal', BogusException1("error1"), _progress_off)
+            self.taskman.add_exc('signal', BogusException1("error1"))
+            self.taskman.add_exc('signal', BogusException2("error2"), _progress_off)
             self.job_kill(signame = "SIGUSR2")
             op = self.assert_next_task_op('signal', BogusException1)
             assert op[3] == "SIGUSR2"
             self.qm_thr.pause_wait()
+            op = self.assert_next_task_op('signal', BogusException2)
+            assert op[3] == "SIGUSR2"
             self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Kill_Retry"})
             self.job_user_hold(new_hold = False)
             self.qm_thr.resume()
@@ -1835,11 +1838,14 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert signame == "SIGUSR2"
             self.qm_thr.pause()
         def _task_active():
-            self.taskman.add_exc('signal', BogusException1("error1"), _progress_off)
+            self.taskman.add_exc('signal', BogusException1("error1"))
+            self.taskman.add_exc('signal', BogusException2("error2"), _progress_off)
             self.job_kill(signame = "SIGUSR2")
             op = self.assert_next_task_op('signal', BogusException1)
             assert op[3] == "SIGUSR2"
             self.qm_thr.pause_wait()
+            op = self.assert_next_task_op('signal', BogusException2)
+            assert op[3] == "SIGUSR2"
             self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Kill_Retry"})
             self.job_user_release(new_hold = False)
             self.qm_thr.resume()
@@ -1855,11 +1861,14 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert signame == "SIGUSR2"
             self.qm_thr.pause()
         def _task_active():
-            self.taskman.add_exc('signal', BogusException1("error1"), _progress_off)
+            self.taskman.add_exc('signal', BogusException1("error1"))
+            self.taskman.add_exc('signal', BogusException2("error2"), _progress_off)
             self.job_kill(signame = "SIGUSR2")
             op = self.assert_next_task_op('signal', BogusException1)
             assert op[3] == "SIGUSR2"
             self.qm_thr.pause_wait()
+            op = self.assert_next_task_op('signal', BogusException2)
+            assert op[3] == "SIGUSR2"
             self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Kill_Retry"})
             try:
                 self.job_run(["R99"])
@@ -1879,17 +1888,17 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert signame == "SIGUSR2"
             self.qm_thr.pause()
         def _task_active():
-            self.taskman.add_exc('signal', BogusException1("error1"), _progress_off)
-            self.taskman.add_exc('signal', BogusException2("error2"))
+            self.taskman.add_exc('signal', BogusException1("error1"))
+            self.taskman.add_exc('signal', BogusException2("error2"), _progress_off)
             self.job_kill(signame = "SIGUSR2")
             op = self.assert_next_task_op('signal', BogusException1)
             assert op[3] == "SIGUSR2"
             self.qm_thr.pause_wait()
+            op = self.assert_next_task_op('signal', BogusException2)
+            assert op[3] == "SIGUSR2"
             self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Kill_Retry"})
             self.job_kill(signame = "SIGINT")
             self.qm_thr.resume()
-            op = self.assert_next_task_op('signal', BogusException2)
-            assert op[3] == "SIGINT"
             op = self.assert_next_task_op('signal')
             assert op[3] == "SIGINT"
         self.job_exec_driver(task_active = _task_active)
@@ -1902,11 +1911,14 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert signame == "SIGUSR2"
             self.qm_thr.pause()
         def _task_active():
-            self.taskman.add_exc('signal', BogusException1("error1"), _progress_off)
+            self.taskman.add_exc('signal', BogusException1("error1"))
+            self.taskman.add_exc('signal', BogusException2("error2"), _progress_off)
             self.job_kill(signame = "SIGUSR2")
             op = self.assert_next_task_op('signal', BogusException1)
             assert op[3] == "SIGUSR2"
             self.qm_thr.pause_wait()
+            op = self.assert_next_task_op('signal', BogusException2)
+            assert op[3] == "SIGUSR2"
             self.job_get_state(assert_spec = {'state':"killing", 'sm_state':"Kill_Retry"})
             self.job_kill(force = True, signame = "SIGINT")
             op = self.assert_next_task_op('signal')
@@ -2893,15 +2905,15 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert op == "wait"
             self.qm_thr.pause()
         def _job_preempting():
-            self.taskman.add_exc('wait', BogusException1("error1"), _progress_off)
-            self.taskman.add_exc('wait', BogusException2("error2"))
+            self.taskman.add_exc('wait', BogusException1("error1"))
+            self.taskman.add_exc('wait', BogusException2("error2"), _progress_off)
             self.job_preempting_wait()
             self.task_finished(0)
             self.assert_next_task_op('wait', BogusException1)
             self.qm_thr.pause_wait()
+            self.assert_next_task_op('wait', BogusException2)
             self.job_get_state(assert_spec = {'state':"preempting", 'sm_state':"Preempt_Finalize_Retry"})
             self.qm_thr.resume()
-            self.assert_next_task_op('wait', BogusException2)
             self.assert_next_task_op('wait')
         self.job_exec_driver(num_preempts = 1, job_preempting = _job_preempting)
 
@@ -2912,19 +2924,19 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert op == "wait"
             self.qm_thr.pause()
         def _job_preempting():
-            self.taskman.add_exc('wait', BogusException1("error1"), _progress_off)
-            self.taskman.add_exc('wait', BogusException2("error2"))
+            self.taskman.add_exc('wait', BogusException1("error1"))
+            self.taskman.add_exc('wait', BogusException2("error2"), _progress_off)
             self.job_preempting_wait()
             self.task_finished(0)
             self.assert_next_task_op('wait', BogusException1)
             self.qm_thr.pause_wait()
+            self.assert_next_task_op('wait', BogusException2)
             self.job_get_state(assert_spec = {'state':"preempting", 'sm_state':"Preempt_Finalize_Retry"})
             self.job_user_hold(new_hold = True)
             self.assert_job_state("preempting")
             self.job_admin_hold(new_hold = True)
             self.assert_job_state("preempting")
             self.qm_thr.resume()
-            self.assert_next_task_op('wait', BogusException2)
             self.assert_next_task_op('wait')
         def _job_preempted():
             self.job_admin_release(new_hold = False)
@@ -2946,12 +2958,13 @@ class CQMIntegrationTestBase (TestCQMComponent):
             assert op == "wait"
             self.qm_thr.pause()
         def _job_preempting():
-            self.taskman.add_exc('wait', BogusException1("error1"), _progress_off)
-            self.taskman.add_exc('wait', BogusException2("error2"))
+            self.taskman.add_exc('wait', BogusException1("error1"))
+            self.taskman.add_exc('wait', BogusException2("error2"), _progress_off)
             self.job_preempting_wait()
             self.task_finished(0)
             self.assert_next_task_op('wait', BogusException1)
             self.qm_thr.pause_wait()
+            self.assert_next_task_op('wait', BogusException2)
             self.job_get_state(assert_spec = {'state':"preempting", 'sm_state':"Preempt_Finalize_Retry"})
             self.job_user_hold(new_hold = True)
             self.assert_job_state("preempting")
@@ -2962,48 +2975,51 @@ class CQMIntegrationTestBase (TestCQMComponent):
             self.job_admin_release(new_hold = False)
             self.assert_job_state("preempting")
             self.qm_thr.resume()
-            self.assert_next_task_op('wait', BogusException2)
             self.assert_next_task_op('wait')
         self.job_exec_driver(num_preempts = 1, job_preempting = _job_preempting)
-    @whitebox
 
+    @whitebox
     @timeout(10)
     def test_preempt_preempt_finalize_retry__kill(self):
         def _progress_off(op, exc, specs):
             assert op == "wait"
             self.qm_thr.pause()
         def _job_preempting():
-            self.taskman.add_exc('wait', BogusException1("error1"), _progress_off)
-            self.taskman.add_exc('wait', BogusException2("error2"))
+            self.taskman.add_exc('wait', BogusException1("error1"))
+            self.taskman.add_exc('wait', BogusException2("error2"), _progress_off)
             self.job_preempting_wait()
             self.task_finished(0)
             self.assert_next_task_op('wait', BogusException1)
             self.qm_thr.pause_wait()
+            self.assert_next_task_op('wait', BogusException2)
             self.job_get_state(assert_spec = {'state':"preempting", 'sm_state':"Preempt_Finalize_Retry"})
             self.job_kill()
             self.qm_thr.resume()
-            self.assert_next_task_op('wait', BogusException2)
             self.assert_next_task_op('wait')
         def _preempt_posttask():
             return False
         self.job_exec_driver(num_preempts = 1, job_preempting = _job_preempting, preempt_posttask = _preempt_posttask)
 
+    @whitebox
     @timeout(10)
     def test_preempt_preempt_finalize_retry__force_kill(self):
         def _progress_off(op, exc, specs):
             assert op == "wait"
             self.qm_thr.pause()
         def _job_preempting():
-            self.taskman.add_exc('wait', BogusException1("error1"), _progress_off)
-            self.taskman.add_exc('wait', BogusException2("error2"))
+            self.taskman.add_exc('wait', BogusException1("error1"))
+            self.taskman.add_exc('wait', BogusException2("error2"), _progress_off)
             self.job_preempting_wait()
             self.task_finished(0)
             self.assert_next_task_op('wait', BogusException1)
+            self.assert_next_task_op('wait', BogusException2)
             self.qm_thr.pause_wait()
             self.job_get_state(assert_spec = {'state':"preempting", 'sm_state':"Preempt_Finalize_Retry"})
             self.job_kill(force = True)
+            op = self.taskman.op_wait()
+            assert op[0] == 'signal'
+            assert op[3] == Signal_Map.terminate
             self.qm_thr.resume()
-            self.assert_next_task_op('wait', BogusException2)
             return False
         self.job_exec_driver(num_preempts = 1, job_preempting = _job_preempting)
 
@@ -3255,22 +3271,9 @@ class CQMIntegrationTestBase (TestCQMComponent):
             resource_posttask = _resource_posttask, job_posttask = _job_posttask)
         
 
-class TestCQMSystemIntegration (CQMIntegrationTestBase):
+class TestCQMIntegration (CQMIntegrationTestBase):
     logger = setup_file_logging("TestCQMSystemIntegration", LOG_FILE, "DEBUG")
     default_job_spec = {'mode':"vn", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096, 'outputdir':"."}
-
-    def setup(self):
-        CQMIntegrationTestBase.setup(self)
-        self.taskman = SimulatedSystem()
-        self.setup_cqm()
-
-    def teardown(self):
-        del self.taskman
-        CQMIntegrationTestBase.teardown(self)
-
-class TestCQMScriptIntegration (CQMIntegrationTestBase):
-    logger = setup_file_logging("TestCQMScriptIntegration", LOG_FILE, "DEBUG")
-    default_job_spec = {'mode':"script", 'command':"/bin/ls", 'walltime':1, 'nodes':1024, 'procs':4096, 'outputdir':"."}
 
     def setup(self):
         CQMIntegrationTestBase.setup(self)
