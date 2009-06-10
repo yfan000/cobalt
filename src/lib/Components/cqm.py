@@ -92,10 +92,9 @@ from Cobalt.Data import Data, DataList, DataDict, IncrID
 from Cobalt.StateMachine import StateMachine
 from Cobalt.Components.base import Component, exposed, automatic, query, locking
 from Cobalt.Proxy import ComponentProxy
-from Cobalt.Exceptions import (QueueError, ComponentLookupError,
-    DataStateError, DataStateTransitionError, StateMachineError,
-    StateMachineIllegalEventError, StateMachineNonexistentEventError,
-    JobProcessingError, JobPreemptionError, ThreadPickledAliveException)
+from Cobalt.Exceptions import (QueueError, ComponentLookupError, DataStateError, DataStateTransitionError, StateMachineError,
+    StateMachineIllegalEventError, StateMachineNonexistentEventError, ThreadPickledAliveException, JobProcessingError,
+    JobRunError, JobPreemptionError, JobDeleteError)
 from Cobalt import accounting
 from Cobalt.Statistics import Statistics
 
@@ -736,12 +735,11 @@ class Job (StateMachine):
             full_msg += "\n    " + entry[:-1]
         logger.error(full_msg)
         if cobalt_log:
-            self.__write_cobalt_log("EXCEPTION: %s" % (fullmsg,))
+            self.__write_cobalt_log("EXCEPTION: %s" % (full_msg,))
 
     def __sm_raise_exception(self, msg, cobalt_log = False):
         self.__sm_log_error(msg, skip_tb_entries = 2, cobalt_log = cobalt_log)
-        full_msg = "Job %d: %s" % (self.jobid, msg)
-        raise JobProcessingError(full_msg, self.jobid, self.user, self.__sm_state, self.__sm_event)
+        raise JobProcessingError(msg, self.jobid, self.user, self.state, self.__sm_state, self.__sm_event)
 
     def __sm_log_user_delete(self, signame, user = None, pending = False):
         if user != None:
@@ -1128,9 +1126,16 @@ class Job (StateMachine):
     def __sm_common__pending_preempt(self, args):
         '''place a pending preemption on a job whose current state does not permit immediately signaling the job'''
         if not self.preemptable:
-            msg = "preemption requests may only be made for preemptable jobs"
-            self.__sm_log_warn(msg, cobalt_log = True)
-            raise JobPreemptionError(msg, self.jobid)
+            self.__sm_log_warn("preemption requests may only be made for preemptable jobs", cobalt_log = True)
+            try:
+                user = args['user']
+            except KeyError:
+                user = self.user
+            try:
+                force = args['force']
+            except KeyError:
+                force = False
+            raise JobPreemptionError("Only preemptable jobs may be preempted.", self.jobid, user, force)
 
         # if a delete is already pending, then ignore preemption request
         if has_private_attr(self, '__signaling_info') and self.__signaling_info.reason == Signal_Info.Reason.delete:
@@ -1274,9 +1279,16 @@ class Job (StateMachine):
         if self.preemptable:
             self.__sm_log_info("job is in the process of being killed; preemption request ignored", cobalt_log = True)
         else:
-            msg = "preemption requests may only be made for preemptable jobs"
-            self.__sm_log_warn(msg, cobalt_log = True)
-            raise JobPreemptionError(msg, self.jobid)
+            self.__sm_log_warn("preemption requests may only be made for preemptable jobs", cobalt_log = True)
+            try:
+                user = args['user']
+            except KeyError:
+                user = self.user
+            try:
+                force = args['force']
+            except KeyError:
+                force = False
+            raise JobPreemptionError("Only preemptable jobs may be preempted.", self.jobid, user, force)
 
     def __sm_kill_retry__progress(self, args):
         '''previous attempt to signal the task to terminate failed; attempt to signal again'''
@@ -1659,9 +1671,16 @@ class Job (StateMachine):
         if self.preemptable:
             self.__sm_log_info("job is in the process of exiting; preemption request ignored", cobalt_log = True)
         else:
-            msg = "preemption requests may only be made for preemptable jobs"
-            self.__sm_log_warn(msg, cobalt_log = True)
-            raise JobPreemptionError(msg, self.jobid)
+            self.__sm_log_warn("preemption requests may only be made for preemptable jobs", cobalt_log = True)
+            try:
+                user = args['user']
+            except KeyError:
+                user = self.user
+            try:
+                force = args['force']
+            except KeyError:
+                force = False
+            raise JobPreemptionError("Only preemptable jobs may be preempted.", self.jobid, user, force)
 
     def __sm_exit_common__kill(self, args):
         '''attempt to perform a user delete on a job that is exiting'''
@@ -1995,19 +2014,21 @@ class Job (StateMachine):
 
     def progress(self):
         '''Run next job step'''
-        self.trigger_event('Progress')
-        # try:
-        #     self.trigger_event('Progress')
-        # except:
-        #     self.__sm_log_exception(None, "Job %s/%s: an exception occurred during a progress event" % (self.jobid, self.user))
+        try:
+            self.trigger_event('Progress')
+        except:
+            self.__sm_log_exception(None, "an exception occurred during a progress event")
 
     def run(self, nodelist):
-        self.trigger_event("Run", {'nodelist' : nodelist})
-        # try:
-        #     self.trigger_event("Run", {'nodelist' : nodelist})
-        # except:
-        #     self.__sm_log_exception(None, "Job %s/%s: an exception occurred while attempting to start the task" % \
-        #         (self.jobid, self.user))
+        try:
+            self.trigger_event("Run", {'nodelist' : nodelist})
+        except StateMachineIllegalEventError:
+            raise JobRunError("Jobs in the '%s' state may not be started." % (self.state,), self.jobid,
+                self.state, self.__sm_state)
+        except:
+            self.__sm_log_exception(None, "an unexpected exception occurred while attempting to start the task")
+            raise JobRunError("An unexpected exception occurred while attempting to start the job.  See log for details.", 
+                self.jobid, self.state, self.__sm_state)
 
     def preempt(self, user = None, force = False):
         '''process a preemption request for a job'''
@@ -2018,8 +2039,14 @@ class Job (StateMachine):
             args['force'] = True
         try:
             self.trigger_event('Preempt', args)
+        except JobPreemptionError:
+            raise
         except StateMachineIllegalEventError:
-            raise JobPreemptionError("jobs in the '%s' state may not be preempted" % (self.state,), self.jobid)
+            raise JobPreemptionError("Jobs in the '%s' state may not be preempted." % (self.state,), self.jobid, user, force)
+        except:
+            self.__sm_log_exception(None, "an unexpected exception occurred while attempting to preempt the task")
+            raise JobPreemptionError("An unexpected exception occurred while attempting to preempt the job.  See log for details.",
+                self.jobid, user, force)
 
     def kill(self, user = None, signame = Signal_Map.terminate, force = False):
         '''process a user delete request for a job'''
@@ -2032,12 +2059,12 @@ class Job (StateMachine):
         self.acctlog.LogMessage('D;%s;%s' % (self.jobid, self.user))
 
         if not force:
-            self.trigger_event('Kill', {'user' : user, 'signal' : signame})
-            # try:
-            #     self.trigger_event('Kill', {'user' : user, 'signal' : signame})
-            # except:
-            #     self.__sm_log_exception(None, "Job %s/%s: an exception occurred while attempting to kill the task" % \
-            #         (self.jobid, self.user))
+            try:
+                self.trigger_event('Kill', {'user' : user, 'signal' : signame})
+            except:
+                self.__sm_log_exception(None, "an unexpected exception occurred while attempting to kill the task")
+                raise JobDeleteError("An unexpected exception occurred while attempting to delete the job.  See log for details.",
+                    self.jobid, user, force, self.state, self.__sm_state)
         else:
             self.__sm_log_info(("forced delete requested by user '%s'; initiating job termination and removal of job " + \
                 "from the queue") % (user,), cobalt_log = True)
@@ -2046,8 +2073,10 @@ class Job (StateMachine):
                 if self.taskid != None:
                     self.__task_signal(retry = False)
             except:
-                self.__sm_log_exception(None, "Job %s/%s: an exception occurred while attempting to forcibly kill the task" % \
-                    (self.jobid, self.user))
+                self.__sm_log_exception(None, "an exception occurred while attempting to forcibly kill the task")
+                raise JobDeleteError(("An error occurred while forcibly killing the job.  The job has been removed from " + \
+                    "the queue; however, resouces may not have been released.  Manual clean up may be required."),
+                    self.jobid, user, force, self.state, self.__sm_state)
             finally:
                 # if the job is running or has run at some point, then collect and output end of job information
                 if self.__sm_state not in ('Ready', 'Hold'):

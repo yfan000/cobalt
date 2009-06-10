@@ -40,7 +40,7 @@ from Cobalt.Components.slp import TimingServiceLocator
 from Cobalt.Data import IncrID, Data, DataDict
 import Cobalt.Exceptions
 from Cobalt.Exceptions import QueueError, ComponentLookupError, DataCreationError, \
-    StateMachineIllegalEventError, JobPreemptionError
+    JobRunError, JobPreemptionError, JobDeleteError
 from Cobalt.Proxy import ComponentProxy
 from Cobalt.Util import Timer
 
@@ -1343,7 +1343,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
             self.job_exec_driver(job_queued = _job_queued)
             assert False, "attempt to run while in a hold state should fail"
         except xmlrpclib.Fault, e:
-            assert e.faultCode == StateMachineIllegalEventError.fault_code
+            assert e.faultCode == JobRunError.fault_code
 
     @timeout(10)
     def test_nonpreempt_hold__kill(self):
@@ -1427,7 +1427,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_run(["R99"])
                 assert False, "attempt to run a job that is starting should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobRunError.fault_code
         self.job_exec_driver(job_pretask = _pretask)
         self.job_exec_driver(resource_pretask = _pretask)
 
@@ -1554,7 +1554,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_run(["R99"])
                 assert False, "attempt to run a job that is already running should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobRunError.fault_code
         self.job_exec_driver(task_active = _task_active)
 
     @timeout(10)
@@ -1739,7 +1739,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_run(["R99"])
                 assert False, "attempt to run a job that is already running should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobRunError.fault_code
             self.qm_thr.resume()
             self.job_running_wait()
             self.assert_next_task_op('add')
@@ -1874,7 +1874,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_run(["R99"])
                 assert False, "attempt to run a job that is already running should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobRunError.fault_code
             self.qm_thr.resume()
             op = self.assert_next_task_op('signal')
             assert op[3] == "SIGUSR2"
@@ -2018,7 +2018,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_run(["R99"])
                 assert False, "attempt to run a job that is already running should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobRunError.fault_code
         self.job_exec_driver(task_active = _task_active)
 
     @timeout(10)
@@ -2106,7 +2106,7 @@ class CQMIntegrationTestBase (TestCQMComponent):
                 self.job_run(["R99"])
                 assert False, "attempt to run a job that is already running should fail"
             except xmlrpclib.Fault, e:
-                assert e.faultCode == StateMachineIllegalEventError.fault_code
+                assert e.faultCode == JobRunError.fault_code
         self.job_exec_driver(job_posttask = _posttask)
         self.job_exec_driver(resource_posttask = _posttask)
 

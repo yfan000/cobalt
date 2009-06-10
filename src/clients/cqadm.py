@@ -9,7 +9,7 @@ import Cobalt.Logging, Cobalt.Util
 import getpass
 import os
 from Cobalt.Proxy import ComponentProxy
-from Cobalt.Exceptions import QueueError, ComponentLookupError, JobPreemptionError
+from Cobalt.Exceptions import QueueError, ComponentLookupError, JobPreemptionError, JobRunError, JobDeleteError
 
 __helpmsg__ = 'Usage: cqadm [--version] [-d] [--hold] [--release] [--run=<location>] ' + \
               '[--preempt] [--kill] [--delete] [--queue=queuename] [--time=time] <jobid> <jobid>\n' + \
@@ -122,17 +122,35 @@ if __name__ == '__main__':
     elif kdata:
         user = getpass.getuser()
         for cmd in kdata:
-            if cmd == '--delete':
-                response = cqm.del_jobs(spec, True, user)
-            else:
-                response = cqm.del_jobs(spec, False, user)
+            try:
+                if cmd == '--delete':
+                    response = cqm.del_jobs(spec, True, user)
+                else:
+                    response = cqm.del_jobs(spec, False, user)
+            except xmlrpclib.Fault, flt:
+                if flt.faultCode == JobDeleteError.fault_code:
+                    args = eval(flt.faultString)
+                    exc = JobDeleteError(*args)
+                    print >>sys.stderr, "Job %s: ERROR - %s" % (exc.jobid, exc.message)
+                    raise SystemExit, exit_code
+                else:
+                    raise
     elif opts['run']:
         location = opts['run']
         part_list = ComponentProxy("system").get_partitions([{'name': location}])
         if len(part_list) != 1:
             print "Error: cannot find partition named '%s'" % location
             raise SystemExit, 1
-        response = cqm.run_jobs(spec, location.split(':'))
+        try:
+            response = cqm.run_jobs(spec, location.split(':'))
+        except xmlrpclib.Fault, flt:
+            if flt.faultCode == JobRunError.fault_code:
+                args = eval(flt.faultString)
+                exc = JobRunError(*args)
+                print >>sys.stderr, "Job %s: ERROR - %s" % (exc.jobid, exc.message)
+                raise SystemExit, 1
+            else:
+                raise
     elif opts['addq']:
         existing_queues = get_queues(cqm)
         if [qname for qname in args if qname in
@@ -232,11 +250,12 @@ if __name__ == '__main__':
             response = cqm.preempt_jobs(spec, user, opts['force'])
         except xmlrpclib.Fault, flt:
             if flt.faultCode == JobPreemptionError.fault_code:
-                (msg, jobid) = eval(flt.faultString)
-                print "ERROR - Job %s: %s" % (jobid, msg)
+                args = eval(flt.faultString)
+                exc = JobPreemptionError(*args)
+                print "Job %s: ERROR - %s" % (exc.jobid, exc.message)
+                raise SystemExit, 1
             else:
-                print flt.faultString
-            raise SystemExit, 1
+                raise
     else:
         updates = {}
         new_q_name = None

@@ -51,21 +51,46 @@ class JobValidationError(Exception):
 
 class JobProcessingError (Exception):
     fault_code = fault_code_counter.next()
-    def __init__(self, msg, jobid, user, state, event):
-        self.args = (msg, jobid, user, state, event)
-        self.msg = msg
+    def __init__(self, msg, jobid, user, state, sm_state, sm_event):
+        self.args = (msg, jobid, user, state, sm_state, sm_event)
+        self.message = msg
         self.jobid = jobid
         self.user = user
         self.state = state
-        self.event = event
+        self.sm_state = state
+        self.sm_event = event
 
 class JobPreemptionError (Exception):
+    log = False
     fault_code = fault_code_counter.next()
-    def __init__(self, msg, jobid):
-        self.args = (msg, jobid)
-        self.msg = msg
+    def __init__(self, msg, jobid, user, force):
+        self.args = (msg, jobid, user, force)
+        self.message = msg
         self.jobid = jobid
-        log = False
+        self.user = user
+        self.force = force
+
+class JobRunError (Exception):
+    log = False
+    fault_code = fault_code_counter.next()
+    def __init__(self, msg, jobid, state, sm_state):
+        self.args = (msg, jobid, state, sm_state)
+        self.message = msg
+        self.jobid = jobid
+        self.state = state
+        self.sm_state = sm_state
+
+class JobDeleteError (Exception):
+    log = False
+    fault_code = fault_code_counter.next()
+    def __init__(self, msg, jobid, user, force, state, sm_state):
+        self.args = (msg, jobid, user, force, state, sm_state)
+        self.message = msg
+        self.jobid = jobid
+        self.user = user
+        self.force = force
+        self.state = state
+        self.sm_state = sm_state
 
 class DataStateError(Exception):
     log = True
