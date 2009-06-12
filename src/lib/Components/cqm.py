@@ -2540,7 +2540,10 @@ class QueueManager(Component):
         def _set_jobs(job, newattr):
             test = job.to_rx()
             test.update(newattr)
-            if self.Queues[job.queue].can_queue(test):
+            #if update "user_hold" alone, do not check MaxQueued restriction
+            if newattr.keys() == ['user_hold']:            
+                job.update(newattr)
+            elif self.Queues[job.queue].can_queue(test):
                 job.update(newattr)
         return self.Queues.get_jobs(specs, _set_jobs, updates)
     set_jobs = exposed(query(set_jobs))
