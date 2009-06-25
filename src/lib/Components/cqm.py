@@ -204,18 +204,15 @@ class RunScriptsThread (PickleAwareThread):
         '''
         PickleAwareThread.__init__(self)
         self.__scripts = scripts
-        params = []
+        self.__params = []
         for attr in attrs:
             if not hasattr(data_object, attr):
                 continue
             value = getattr(data_object, attr)
             if isinstance(value, list):
-                params.append('%s="%s"' % (attr, ':'.join([str(v) for v in value])))
-            elif isinstance(value, dict):
-                params.append('%s="{%s}"' % (attr, str(value)))
+                self.__params.append('%s=%s' % (attr, ':'.join([Cobalt.Util.escape_string(str(v), ":") for v in value])))
             else:
-                params.append('%s="%s"' % (attr, value))
-        self.__params = " ".join(params)
+                self.__params.append('%s=%s' % (attr, str(value)))
         self.__results = []
 
     def __getstate__(self):
@@ -229,10 +226,12 @@ class RunScriptsThread (PickleAwareThread):
         routine that runs the scripts and collects their results
         '''
         for script in self.__scripts:
+            if script == "":
+                continue
             results = {}
             results['script'] = script
             try:
-                rc, out, err = Cobalt.Util.runcommand("%s %s" % (script, self.__params))
+                rc, out, err = Cobalt.Util.runcommand(script, self.__params)
                 results['rc'] = rc
                 results['out'] = out
                 results['err'] = err
@@ -848,12 +847,15 @@ class Job (StateMachine):
                     ":".join(self.__sm_scripts_thread.scripts_completed)), cobalt_log = True)
                 self.__sm_scripts_state_unknown = True
 
+        self.__sm_scripts_thread.join()
+
         for result in self.__sm_scripts_thread.results:
             if result.has_key('exception'):
                 self.__sm_log_warn("exception with %s %s, error is %s" % (type, result['script'], result['exception']))
             elif result['rc'] != 0:
-                self.__sm_log_warn("return code from %s %s was %d; error text follows:%s" %
-                    (type, result['script'], result['rc'], "    ".join(["\n"] + result['err'])))
+                err_msg = ("\n" + result['err']).replace("\n", "\n    ").rstrip()
+                self.__sm_log_warn("return code from %s %s was %d; error text follows:%s" % \
+                    (type, result['script'], result['rc'], err_msg))
         return True
 
     def __sm_common_queued__hold(self, hold_state, args):
@@ -989,13 +991,17 @@ class Job (StateMachine):
             self.acctlog.LogMessage("Job %s/%s/Q:%s: Running job on %s" % (self.jobid, self.user, self.queue, \
                 ":".join(self.location)))
 
+        optional = {}
+        if self.project:
+            optional['account'] = self.project
         # group and session are unknown
         accounting_logger.info(accounting.start(self.jobid, self.user,
-            "unknown", self.jobname, self.queue, self.ctime, self.qtime,
-            self.etime, self.start, self.exec_host,
+            "unknown", self.jobname, self.queue,
+            self.outputdir, self.command, self.args, self.mode,
+            self.ctime, self.qtime, self.etime, self.start, self.exec_host,
             {'ncpus':self.procs, 'nodect':self.nodes,
              'walltime':str_elapsed_time(self.walltime * 60)},
-            "unknown"))
+            "unknown", **optional))
 
         # notify the user that the job is starting; a separate thread is used to send the email so that cqm does not block
         # waiting for the smtp server to respond
@@ -1599,13 +1605,17 @@ class Job (StateMachine):
             self.acctlog.LogMessage("Job %s/%s/Q:%s: Running job on %s" % (self.jobid, self.user, self.queue, \
                 ":".join(self.location)))
 
+        optional = {}
+        if self.project:
+            optional['account'] = self.project
         # group and session are unknown
         accounting_logger.info(accounting.start(self.jobid, self.user,
-            "unknown", self.jobname, self.queue, self.ctime, self.qtime,
-            self.etime, self.start, self.exec_host,
+            "unknown", self.jobname, self.queue,
+            self.outputdir, self.command, self.args, self.mode,
+            self.ctime, self.qtime, self.etime, self.start, self.exec_host,
             {'ncpus':self.procs, 'nodect':self.nodes,
              'walltime':str_elapsed_time(self.walltime * 60)},
-            "unknown"))
+            "unknown", **optional))
 
         # start resource prologue scripts
         resource_scripts = get_cqm_config('resource_prescripts', "").split(':')
@@ -1757,8 +1767,9 @@ class Job (StateMachine):
             exit_status = "unknown"
         # group and session are unknown
         accounting_logger.info(accounting.end(self.jobid, self.user,
-            "unknown", self.jobname, self.queue, self.ctime, self.qtime,
-            self.etime, self.start, self.exec_host,
+            "unknown", self.jobname, self.queue,
+            self.outputdir, self.command, self.args, self.mode,
+            self.ctime, self.qtime, self.etime, self.start, self.exec_host,
             {'ncpus':self.procs, 'nodect':self.nodes,
              'walltime':str_elapsed_time(self.walltime * 60)},
             "unknown", self.end, exit_status,
@@ -2098,8 +2109,9 @@ class Job (StateMachine):
                         optional['account'] = self.project
                     # group, session and exit_status are unknown
                     accounting_logger.info(accounting.end(self.jobid, self.user,
-                        "unknown", self.jobname, self.queue, self.ctime, self.qtime,
-                        self.etime, self.start, self.exec_host,
+                        "unknown", self.jobname, self.queue,
+                        self.outputdir, self.command, self.args, self.mode,
+                        self.ctime, self.qtime, self.etime, self.start, self.exec_host,
                         {'ncpus':self.procs, 'nodect':self.nodes,
                          'walltime':str_elapsed_time(self.walltime * 60)},
                          "unknown", self.end, "unknown",

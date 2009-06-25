@@ -11,7 +11,7 @@ import sys
 import time
 import ConfigParser
 import os.path
-import popen2
+import subprocess
 from datetime import date, datetime
 from getopt import getopt, GetoptError
 from Cobalt.Exceptions import TimeFormatError, TimerException, ThreadPickledAliveException
@@ -80,6 +80,11 @@ def get_time(date_string):
     minutes += 60 * time_info.get("hours", 0)
     minutes += 1440 * time_info.get("days", 0)
 
+    # XML-RPC only allows 32-bit integers... so make sure the user isn't
+    # trying to specify a number that causes an explosion
+    if minutes > 2**31:
+        raise TimeFormatError, "%d years is too long" % (minutes/525600, )
+
     return minutes
 
 
@@ -89,7 +94,6 @@ def dgetopt(arglist, opt, vopt, msg):
     for optname in opt.values() + vopt.values():
         ret[optname] = False
     gstr = "".join(opt.keys()) + "".join([longopt+':' for longopt in vopt.keys()])
-    gstr += 'C:'
     try:
         (opts, args) = getopt(arglist, gstr)
     except GetoptError, gerr:
@@ -101,9 +105,6 @@ def dgetopt(arglist, opt, vopt, msg):
         if opt.has_key(option):
             ret[opt[option]] = True
         else:
-            if option == 'C':
-                if 'C' not in opt.keys() + vopt.keys():
-                    continue
             ret[vopt[option]] = garg
     return ret, list(args)
 
@@ -128,7 +129,6 @@ def dgetopt_long(arglist, opt, vopt, msg):
         else:
             gstr = gstr + o + ':'
 
-    gstr += 'C:'
     try:
         (opts, args) = getopt(arglist, gstr, long_opts)
     except GetoptError, gerr:
@@ -141,8 +141,6 @@ def dgetopt_long(arglist, opt, vopt, msg):
         if opt.has_key(option):
             ret[opt[option]] = True
         else:
-            if option == 'C' and 'C' not in opt.keys() + vopt.keys():
-                continue
             ret[vopt[option]] = garg
 
     return ret, list(args)
@@ -248,15 +246,17 @@ def sendemail(toaddr, subj, msg, smtpserver = 'localhost'):
         print 'Problem sending mail', msg
     server.quit()
     
-def runcommand(cmd):
+def runcommand(cmd, args):
     '''Execute command, returning rc, stdout, stderr'''
-    cmdp = popen2.Popen3(os.path.expandvars(cmd), True)
-    out = []
-    err = []
-    status = cmdp.wait()
-    out += cmdp.fromchild.readlines()
-    err += cmdp.childerr.readlines()
-    return (status, out, err)
+    proc = subprocess.Popen([os.path.expandvars(cmd)] + args, close_fds = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+    out, err = proc.communicate()
+    return (proc.returncode, out, err)
+
+def escape_string(string, chars = "\""):
+    string = string.replace('\\', '\\\\')
+    for char in list(chars):
+        string = string.replace(char, '\\' + char)
+    return string
 
 class AccountingLog:
     def __init__(self, name):
@@ -313,32 +313,32 @@ def processfilter(cmdstr, jobdict):
     extra = []
     for key, value in jobdict.iteritems():
         if isinstance(value, list):
-            extra.append('%s="%s"' % (key, ':'.join(value)))
-        elif isinstance(value, dict):
-            extra.append('%s="{%s}"' % (key, str(value)))
+            extra.append('%s=%s' % (key, ':'.join([escape_string(str(v), ":") for v in value])))
         else:
-            extra.append('%s="%s"' % (key, value))
-    rc, out, err = Cobalt.Util.runcommand(" ".join([cmdstr] + extra))
+            extra.append('%s=%s' % (key, str(value)))
+    rc, out, err = Cobalt.Util.runcommand(cmdstr, extra)
     if err:
         # strip \n from last line of stderr to make sure only
         # one \n is print'ed 
-        err[-1] = err[-1].strip()
-        # the lines in err already end in \n from readlines()
-        print >> sys.stderr, ''.join(err)
+        err = err.rstrip('\n')
+        print >> sys.stderr, err
     if rc != 0:
         print >> sys.stderr, "Filter %s failed" % (cmdstr)
         sys.exit(1)
-    if out:
-        for line in out:
+    out = out.split('\n')
+    for line in out:
+        try:
             key, value = line.strip().split('=', 1)
-            if key not in jobdict.keys():
-                jobdict[key] = value
-            elif isinstance(jobdict[key], list):
-                jobdict[key] = value.split(':')
-            elif isinstance(jobdict[key], dict):
-                jobdict[key].update(eval(value))
-            else:
-                jobdict[key] = value
+        except ValueError:
+            continue
+        if key not in jobdict.keys():
+            jobdict[key] = value
+        elif isinstance(jobdict[key], list):
+            jobdict[key] = value.split(':')
+        elif isinstance(jobdict[key], dict):
+            jobdict[key].update(eval(value))
+        else:
+            jobdict[key] = value
 
 
 class Timer (object):
