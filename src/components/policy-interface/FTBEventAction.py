@@ -57,7 +57,7 @@ class EventsTable:
     def getEventsTable(self):
 	return self.eventTable
 
-class FTBEventAction(object):
+class FTBEventAction(FTB):
     eventsTable = []
 
     def __init__(self):
@@ -83,18 +83,18 @@ class FTBEventAction(object):
 	eventSpaceEvents = self.getEventSpaceEvents(eventSpace)
 	eventInfo = []
 	for event in eventSpaceEvents:
-            eventInfo.append([event.eventSpaceName,
+            eventInfo.append([event.eventName,
                              event.eventSeverity])
 	print eventInfo, len(eventInfo)
 
-	self.bus.FTB_Declare_publishable_events( None, [ ["WATCH_DOG_EVENT", "INFO"] ], 1);
-
-#	self.bus.FTB_Declare_publishable_events(None, eventInfo, len(eventInfo))
+	self.bus.FTB_Declare_publishable_events(None, eventInfo, len(eventInfo))
 	sHandle = self.bus.FTB_subscribe_handle_t()
 	self.bus.FTB_Subscribe( sHandle,
-				'event_space=ftb.all.watchdog',
+				'event_space=ftb.all.watchdog', #I have no idea of this
 				None,
 				None)
+	
+	return self.bus, sHandle
 
     def getEventSpaceEvents(self, eventSpaceName):
 	eventSpaceEvents = []
