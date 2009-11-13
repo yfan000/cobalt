@@ -1,6 +1,10 @@
 #!/usr/bin/python
 
 import xml.etree.cElementTree as ceTree
+import string, sys, time
+from ftb import *
+from ctypes import *
+from array import *
 
 policyDirName  = '.'
 policyFileName = 'policy.xml'
@@ -50,12 +54,63 @@ class EventsTable:
                 er.getEventName(), er.getEventSeverity(), \
                 er.getEventAction()
 
-class FTBEventAction:
-    def __init__(self):
-	pass
+    def getEventsTable(self):
+	return self.eventTable
 
-    def register(self):
-	pass
+class FTBEventAction(object):
+    eventsTable = []
+
+    def __init__(self):
+	et = EventsTable()
+	self.eventsTable = et.getEventsTable();
+	self.bus = FTB()
+
+    def register(self,
+                 clientSchemaVer,
+                 eventSpace,
+                 clientName,
+                 clientJobId,
+                 clientSubscriptionStyle,
+                 clientPollingQueueLen):
+
+        self.bus.FTB_Connect(clientSchemaVer,
+                             eventSpace,
+                             clientName,
+                             clientJobId,
+                             clientSubscriptionStyle,
+                             clientPollingQueueLen)
+
+	eventSpaceEvents = self.getEventSpaceEvents(eventSpace)
+	eventInfo = []
+	for event in eventSpaceEvents:
+            eventInfo.append([event.eventSpaceName,
+                             event.eventSeverity])
+	print eventInfo, len(eventInfo)
+
+	self.bus.FTB_Declare_publishable_events( None, [ ["WATCH_DOG_EVENT", "INFO"] ], 1);
+
+#	self.bus.FTB_Declare_publishable_events(None, eventInfo, len(eventInfo))
+	sHandle = self.bus.FTB_subscribe_handle_t()
+	self.bus.FTB_Subscribe( sHandle,
+				'event_space=ftb.all.watchdog',
+				None,
+				None)
+
+    def getEventSpaceEvents(self, eventSpaceName):
+	eventSpaceEvents = []
+	for event in self.eventsTable:
+            if event.eventSpaceName == eventSpaceName:
+		eventSpaceEvents.append(event)
+
+	return eventSpaceEvents
+    
+
 
 if __name__=='__main__':
-    EventsTable().displayLoadedPolicies()
+    et = FTBEventAction().getEventSpaceEvents('FTB.FTB_EXAMPLES.watchdog')
+
+    for er in et:
+        print er.eventSpaceId, er.eventSpaceName, \
+            er.getEventName(), er.getEventSeverity(), \
+            er.getEventAction()
+    

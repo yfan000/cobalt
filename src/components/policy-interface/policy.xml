@@ -1,6 +1,6 @@
 <?xml version="1.1"?>
 <policy>
- <eventSpace eventSpaceId="1" eventSpaceName="MY_TEST_APP">
+ <eventSpace eventSpaceId="1" eventSpaceName="FTB.FTB_EXAMPLES.watchdog">
   <eventRule id="1">
    <eventName>WATCH_DOG_EVENT</eventName>
    <eventSeverity>INFO</eventSeverity>
