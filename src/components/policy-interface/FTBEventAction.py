@@ -57,12 +57,18 @@ class EventsTable:
     def getEventsTable(self):
 	return self.eventTable
 
+    def getActionName(self, eventName):
+	for eventTuple in self.eventTable:
+            if eventTuple.eventName == eventName:
+		return eventTuple.eventAction
+
+
 class FTBEventAction(FTB):
     eventsTable = []
 
     def __init__(self):
-	et = EventsTable()
-	self.eventsTable = et.getEventsTable();
+	self.et = EventsTable()
+	self.eventsTable = self.et.getEventsTable();
 	self.bus = FTB()
 
     def register(self,
@@ -85,7 +91,7 @@ class FTBEventAction(FTB):
 	for event in eventSpaceEvents:
             eventInfo.append([event.eventName,
                              event.eventSeverity])
-	print eventInfo, len(eventInfo)
+#	print eventInfo, len(eventInfo)
 
 	self.bus.FTB_Declare_publishable_events(None, eventInfo, len(eventInfo))
 	sHandle = self.bus.FTB_subscribe_handle_t()
@@ -94,7 +100,14 @@ class FTBEventAction(FTB):
 				None,
 				None)
 	
-	return self.bus, sHandle
+	return sHandle
+
+    def raiseEvent(self, eventName, eventHandle):
+	self.bus.FTB_Publish(eventName, eventHandle)
+
+    def pollEvent(self, sHandle, cEvent):
+	while(self.bus.FTB_Poll_event(sHandle, cEvent)):
+            return True
 
     def getEventSpaceEvents(self, eventSpaceName):
 	eventSpaceEvents = []
@@ -104,7 +117,8 @@ class FTBEventAction(FTB):
 
 	return eventSpaceEvents
     
-
+    def getEventAction(self, eventName):
+	return self.et.getActionName(eventName)
 
 if __name__=='__main__':
     et = FTBEventAction().getEventSpaceEvents('FTB.FTB_EXAMPLES.watchdog')

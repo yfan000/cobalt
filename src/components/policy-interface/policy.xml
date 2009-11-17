@@ -7,4 +7,31 @@
    <eventAction>IGNORE</eventAction>
   </eventRule>
  </eventSpace>
+ <eventSpace eventSpaceId="1" eventSpaceName="TEST.TEST00.es01">
+  <eventRule id="1">
+   <eventName>E01</eventName>
+   <eventSeverity>S01</eventSeverity>
+   <eventAction>A01</eventAction>
+  </eventRule>
+  <eventRule id="2">
+   <eventName>E02</eventName>
+   <eventSeverity>S02</eventSeverity>
+   <eventAction>A02</eventAction>
+  </eventRule>
+  <eventRule id="3">
+   <eventName>E03</eventName>
+   <eventSeverity>S03</eventSeverity>
+   <eventAction>A03</eventAction>
+  </eventRule>
+  <eventRule id="4">
+   <eventName>E04</eventName>
+   <eventSeverity>S04</eventSeverity>
+   <eventAction>A04</eventAction>
+  </eventRule>
+  <eventRule id="5">
+   <eventName>E05</eventName>
+   <eventSeverity>S05</eventSeverity>
+   <eventAction>A05</eventAction>
+  </eventRule>
+ </eventSpace>
 </policy>
