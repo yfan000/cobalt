@@ -4,7 +4,7 @@ import time
 from FTBEventAction import *
 
 fea = FTBEventAction()
-sHandle = fea.register('0.5',
+f, sHandle = fea.register('0.5',
                        'FTB.FTB_EXAMPLES.watchdog',
                        'trial-watchdog',
                        '0',
@@ -12,6 +12,10 @@ sHandle = fea.register('0.5',
                        0)
 
 
-eHandle = fea.FTB_event_handle_t()
-fea.raiseEvent("WATCH_DOG_EVENT",eHandle)
 
+#fea.raiseEvent("WATCH_DOG_EVENT",eHandle)
+while(True):
+	eHandle = f.FTB_event_handle_t()
+	f.FTB_Poll_event(sHandle, eHandle)
+	print eHandle.event_name
+	time.sleep(2)

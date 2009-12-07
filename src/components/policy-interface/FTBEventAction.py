@@ -64,11 +64,8 @@ class EventsTable:
 
 
 class FTBEventAction(FTB):
-    eventsTable = []
-
     def __init__(self):
 	self.et = EventsTable()
-	self.eventsTable = self.et.getEventsTable();
 	self.bus = FTB()
 
     def register(self,
@@ -86,28 +83,19 @@ class FTBEventAction(FTB):
                              clientSubscriptionStyle,
                              clientPollingQueueLen)
 
-	eventSpaceEvents = self.getEventSpaceEvents(eventSpace)
-	eventInfo = []
-	for event in eventSpaceEvents:
-            eventInfo.append([event.eventName,
-                             event.eventSeverity])
-#	print eventInfo, len(eventInfo)
-
-	self.bus.FTB_Declare_publishable_events(None, eventInfo, len(eventInfo))
 	sHandle = self.bus.FTB_subscribe_handle_t()
 	self.bus.FTB_Subscribe( sHandle,
-				'event_space=ftb.all.watchdog', #I have no idea of this
+				'event_space=' + eventSpace,
 				None,
 				None)
 	
 	return sHandle
 
-    def raiseEvent(self, eventName, eventHandle):
-	self.bus.FTB_Publish(eventName, eventHandle)
+    def pollEvent(self, sHandle):
+	cEvent = self.bus.FTB_receive_event_t()
+	ret = self.bus.FTB_Poll_event(sHandle, cEvent)
 
-    def pollEvent(self, sHandle, cEvent):
-	while(self.bus.FTB_Poll_event(sHandle, cEvent)):
-            return True
+	return cEvent, ret
 
     def getEventSpaceEvents(self, eventSpaceName):
 	eventSpaceEvents = []

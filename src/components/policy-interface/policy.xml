@@ -7,7 +7,7 @@
    <eventAction>IGNORE</eventAction>
   </eventRule>
  </eventSpace>
- <eventSpace eventSpaceId="1" eventSpaceName="TEST.TEST00.es01">
+ <eventSpace eventSpaceId="2" eventSpaceName="TEST.TEST00.es01">
   <eventRule id="1">
    <eventName>E01</eventName>
    <eventSeverity>S01</eventSeverity>

@@ -262,9 +262,9 @@ class FTB(object):
         #self.shandle = shandle
         #self.ret = libftb.FTB_Poll_event(self.shandle, byref(self.receive_event))
         ret = libftb.FTB_Poll_event(shandle, byref(receive_event))
-	if ret != FTB_SUCCESS:
-            print "FTB_Poll_event failed. Return code =", self.ret
-            sys.exit()
+#	if ret != FTB_SUCCESS:
+#            print "FTB_Poll_event failed. Return code =", self.ret
+#            sys.exit()
         return ret
 
     def FTB_Disconnect(self):
