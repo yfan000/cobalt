@@ -1,0 +1,18 @@
+<?xml version="1.1"?>
+<policy>
+  <application name="test-app"> 
+    <eventSpace eventSpaceId="1" eventSpaceName="EVENT-SPACE-01">
+      <eventRule id="1" type="single" name="EVENT-TYPE-01">
+	<eventAction>ACTION-TYPE:01</eventAction>
+      </eventRule>
+      <eventRule id="2" type="multiple" name="EVENT-TYPE-02">
+	<count>5</count>
+	<eventAction>ACTION-TYPE:02</eventAction>
+      </eventRule>
+      <eventRule id="3" type="timed" name="EVENT-TYPE-03">
+	<time>500</time>
+	<eventAction>ACTION-TYPE:03</eventAction>
+      </eventRule>
+    </eventSpace>
+  </application>
+</policy>
