@@ -108,20 +108,19 @@ class FTBEventPolicy(FTB):
 
 	return cEvent, ret
 
-    def getEventSpaceEvents(self, eventSpaceName):
-	eventSpaceEvents = []
+    def getPolicyDefinitions(self):
+	policyDefinitions = {}
 	est = self.et.getEventsTable()
 	for event in est:
-            if event.eventSpaceName == eventSpaceName:
-		eventSpaceEvents.append(event)
+            policyDefinitions.update({event.name : event})
 
-	return eventSpaceEvents
+	return policyDefinitions
     
     def getEventAction(self, eventName):
 	return self.et.getActionName(eventName)
 
 if __name__=='__main__':
-    et = FTBEventAction().getEventSpaceEvents('EVENT-SPACE-01')
+    et = FTBEventPolicy().getPolicyDefinitions()
 
     for er in et:
         print er.eventSpaceId, er.eventSpaceName, \
