@@ -29,9 +29,29 @@ class EventMonitor():
 	    if ret != FTB_SUCCESS:
 		continue
 	    eventAttrib = self.policyDefinitions[cEvent.event_name]
-	    print 'Event-Type: ', eventAttrib.type, 
-	    print ' Caught: ', cEvent.event_name
+            if eventAttrib.type == 'multiple':
+		self.processMultipleTypeEvent(eventAttrib, cEvent)
+            elif eventAttrib.type == 'timed':
+		self.processTimedTypeEvent(eventAttrib)
+            else:
+		self.processSingleTypeEvent(eventAttrib)
 
+    def processSingleTypeEvent(self, ea):
+	print 'Event: %s, Type: %s, Action: %s' % (
+		        ea.name, ea.type, ea.action)
+
+
+    def processMultipleTypeEvent(self, ea, ce):
+	multipleCountThreshold = int(ea.count)
+	if ((int(ce.seqnum) % multipleCountThreshold) == 0):
+            print 'Receved event %s of type %s from client %s on host: %s!' % (
+		        ea.name, ea.type, ce.client_name, ce.incoming_src.hostname)
+            print 'Application threshold reached. Taking action: %s' % ( ea.action )
+	
+
+    def processTimedTypeEvent(self, ea):
+	print 'Event: %s, Type: %s, Action: %s' % (
+		        ea.name, ea.type, ea.action)
 
 if __name__=='__main__':
 	EventMonitor()
