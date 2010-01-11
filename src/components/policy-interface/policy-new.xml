@@ -10,7 +10,7 @@
 	<eventAction>ACTION-TYPE:02</eventAction>
       </eventRule>
       <eventRule id="3" type="timed" name="ETYPE03">
-	<time>500</time>
+	<time>5000</time>
 	<eventAction>ACTION-TYPE:03</eventAction>
       </eventRule>
     </eventSpace>

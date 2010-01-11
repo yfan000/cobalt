@@ -32,7 +32,7 @@ class EventMonitor():
             if eventAttrib.type == 'multiple':
 		self.processMultipleTypeEvent(eventAttrib, cEvent)
             elif eventAttrib.type == 'timed':
-		self.processTimedTypeEvent(eventAttrib)
+		self.processTimedTypeEvent(eventAttrib, cEvent)
             else:
 		self.processSingleTypeEvent(eventAttrib)
 
@@ -44,14 +44,35 @@ class EventMonitor():
     def processMultipleTypeEvent(self, ea, ce):
 	multipleCountThreshold = int(ea.count)
 	if ((int(ce.seqnum) % multipleCountThreshold) == 0):
-            print 'Receved event %s of type %s from client %s on host: %s!' % (
-		        ea.name, ea.type, ce.client_name, ce.incoming_src.hostname)
+            print 'Received event %s of type \'%s\' from client \'%s\' on host: %s!' % (
+		        ea.name, ea.type, ce.client_name, ce.incoming_src.hostname),
             print 'Application threshold reached. Taking action: %s' % ( ea.action )
+            print 'client_jobid: %s, client_extension: %s, payload: %s' % (
+			ce.client_jobid, ce.client_extension, ce.event_payload)
+            print 'PID start_time: %s, PID: %s' % (
+			ce.incoming_src.pid_starttime, ce.incoming_src.pid)
 	
 
-    def processTimedTypeEvent(self, ea):
-	print 'Event: %s, Type: %s, Action: %s' % (
-		        ea.name, ea.type, ea.action)
+    timedEventMap = {}
+    prevTime = None
+    def processTimedTypeEvent(self, ea, ce):
+	eventKey = ce.incoming_src.hostname + '-' + str(ce.incoming_src.pid)
+#	print eventKey
+	
+	if not eventKey in self.timedEventMap:
+#             print 'Event: %s, Type: %s, Action: %s, Time: %s' % (
+# 		        ea.name, ea.type, ea.action, ea.time)
+            curTime = time.time()
+            if self.prevTime != None:
+		deltaTime = curTime - self.prevTime
+		self.prevTime = curTime
+		deltaMiliSec = deltaTime * 1000
+		if deltaMiliSec < int(ea.time):
+                    print "*** At %d milisecs ***" % (deltaMiliSec)
+		else:
+                    print 'Caught but safe(%d msec)' % (deltaMiliSec)
+            else:
+		self.prevTime = curTime
 
 if __name__=='__main__':
 	EventMonitor()

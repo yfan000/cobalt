@@ -6,7 +6,7 @@ from ftb import *
 
 ftb = FTB()
 
-ftb.FTB_Connect("0.5", "FTB.APP01.ES01", "app02b", "0", "FTB_SUBSCRIPTION_NONE", 0)
+ftb.FTB_Connect("0.5", "FTB.APP01.ES01", "app02b", "1", "FTB_SUBSCRIPTION_NONE", 0)
 ftb.FTB_Declare_publishable_events( None, [ ["ETYPE02", "INFO"] ], 1);
 
 # shandle=ftb.FTB_subscribe_handle_t()
