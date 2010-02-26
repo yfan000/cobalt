@@ -10,8 +10,8 @@ configFileName = "monitor-config.xml"
 configInstance = "1"
 
 class EventTuple:
-    def __init__(self, eventSpaceId, eventSpaceName, eventRule):
-        self.eventSpaceId   = eventSpaceId
+    def __init__(self, eventSpaceName, eventRule):
+#        self.eventSpaceId   = eventSpaceId
         self.eventSpaceName = eventSpaceName
         self.assignAllFields(eventRule)
 
@@ -29,8 +29,6 @@ class EventTuple:
 
 	if self.eventType == 'timed' or self.eventType == 'HYBRID':
             self.time = int(er.find('time').text)
-
-#	print self.id, self.name, self.eventType, self.actionType, self.action, self.count, self.time
 
 
     def getEventName(self):
@@ -59,11 +57,10 @@ class EventsTable:
                 self.addToTable(eventSpace)		
 
     def addToTable(self, es):
-    	eventSpaceId   = es.get('eventSpaceId')
+#    	eventSpaceId   = es.get('eventSpaceId')
 	eventSpaceName = es.get('eventSpaceName')
 	for eventRule in es:
-            self.eventTable.append(EventTuple(eventSpaceId, 
-                                              eventSpaceName,          
+            self.eventTable.append(EventTuple(eventSpaceName,          
                                               eventRule))
             
     def displayLoadedPolicies(self):
@@ -82,8 +79,7 @@ class EventsTable:
 
 
 class FTBEventPolicy(FTB):
-    def __init__(self):
-        policyDefFile = self.loadConfig()
+    def __init__(self, policyDefFile):
 	self.et = EventsTable(policyDefFile)
 	self.bus = FTB()
 
@@ -110,21 +106,19 @@ class FTBEventPolicy(FTB):
 	
 	return sHandle
 
-    def loadConfig(self):
-	configFile = open(configFileName, 'r')
-	configTree = ceTree.parse(configFile)
+    # def loadConfig(self):
+    #     configFile = open(configFileName, 'r')
+    #     configTree = ceTree.parse(configFile)
 
-	policyFile = None
-	for config in configTree.findall("monitorConfig"):
-            if config.get('id') != configInstance:
-		continue
+    #     policyFile = None
+    #     for config in configTree.findall("monitorConfig"):
+    #         if config.get('id') != configInstance:
+    #     	continue
             
-            for param in config.findall('policyFilePath'):
-		policyFile = open(param.text, 'r')
+    #         for param in config.findall('policyFilePath'):
+    #     	policyFile = open(param.text, 'r')
 
-	return policyFile
-
-	
+    #     return policyFile	
 
     def pollEvent(self, sHandle):
 	cEvent = self.bus.FTB_receive_event_t()
@@ -147,6 +141,9 @@ if __name__=='__main__':
     et = FTBEventPolicy().getPolicyDefinitions()
 
     for er in et:
-        print er.eventSpaceId, er.eventSpaceName, \
-            er.id, er.name, er.eventType, er.action, er.count, er.time
+	print er
+
+    # for er in et:
+    #     print er.eventSpaceName, er.id, er.name, er.eventType, \
+    #     	er.actionType, er.action, er.count, er.time
     

@@ -4,32 +4,52 @@ import time, sys
 from FTBEventPolicy import *
 
 class EventMonitor():
-        schemaVersion = None
-           clientName = None
-           eventSpace = None
-                jobID = None
+    schemaVersion = None
+    clientName = None
+    eventSpace = None
+    jobID = None
     subscriptionStyle = None
-             queueLen = 0
+    queueLen = 0
 
-       ftbEventPolicy = None
+    ftbEventPolicy = None
     policyDefinitions = {}
 
     def __init__(self):
-	
+	self.loadConfiguration()	
 	sHandle = self.doRegister()
 	self.startMonitor(sHandle)
 
     def loadConfiguration(self):
+	configFile = open(configFileName, 'r')
+	configTree = ceTree.parse(configFile)
+
+	policyFile = None
+	for config in configTree.findall("monitorConfig"):
+            if config.get('id') != configInstance:
+		continue
+            
+            for param in config.findall('policyFilePath'):
+		policyFile = open(param.text, 'r')
+	    
+	    self.policyFilePath    = config.find('policyFilePath').text
+	    self.schemaVersion     = config.find('schemaVersion').text 
+	    self.clientName        = config.find('clientName').text
+	    self.clientJobID       = config.find('clientJobID').text 
+	    self.namespaceString   = config.find('namespaceString').text 
+	    self.subscriptionStyle = config.find('subscriptionStyle').text 
+	    self.pollingQueueLen   = int(config.find('pollingQueueLen').text)
+			
+	return policyFile	
 	
 
     def doRegister(self):
-	self.ftbEventPolicy = FTBEventPolicy()
-	sHandle = self.ftbEventPolicy.register('0.5',
-                       'FTB.APP01.ES01',
-                       'handler-01',
-                       '0',
-                       'FTB_SUBSCRIPTION_POLLING',
-                       0)
+	self.ftbEventPolicy = FTBEventPolicy(self.policyFilePath)
+	sHandle = self.ftbEventPolicy.register(self.schemaVersion,
+                       			       self.namespaceString,
+					       self.clientName,
+					       self.clientJobID,
+					       self.subscriptionStyle,
+					       self.pollingQueueLen)
 	return sHandle
 
     def startMonitor(self, sHandle):
