@@ -5,7 +5,7 @@
    <event id="1" type="SINGLE" comment="Single type event">
     <eventName>SINGLE_FAIL</eventName>
     <action type="MESSAGE">
-     <message>SINGLE_FAIL occured</message>
+     <command>SINGLE_FAIL occured</command>
     </action>
    </event>
    <event id="2" type="MULTIPLE" comment="Multiple type event">
@@ -19,7 +19,7 @@
     <eventName>TIMED_FAIL</eventName>
     <time>5000</time>
     <action type="EXECUTION">
-     <command>echo 'TIMED_FAIL occured'<command>
+     <command>echo 'TIMED_FAIL occured'</command>
     </action>
    </event>
    <event id="4" type="HYBRID" comment="Multiple failure within time limit">

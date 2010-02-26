@@ -9,10 +9,6 @@ from array import *
 configFileName = "monitor-config.xml"
 configInstance = "1"
 
-policyDirName  = None #'.'
-#policyFileName = None #'policy-new.xml'
-#policyFile = open(policyDirName + '/' + policyFileName)
-
 class EventTuple:
     def __init__(self, eventSpaceId, eventSpaceName, eventRule):
         self.eventSpaceId   = eventSpaceId
@@ -20,18 +16,21 @@ class EventTuple:
         self.assignAllFields(eventRule)
 
     def assignAllFields(self, er):
-	self.id       = er.get('id')
-        self.name     = er.get('name')
-	self.type     = er.get('type')
-        self.action   = er.find('eventAction').text
-	self.count    = -1
-	self.time     = -1
+	self.id            = er.get('id')
+        self.name          = er.find('eventName').text
+	self.eventType     = er.get('type')
+        self.actionType    = er.find('action').get('type')
+	self.action        = er.find('action').find('command').text
+	self.count         = -1
+	self.time          = -1
 
-	if self.type == 'multiple':
+	if self.eventType == 'MULTIPLE' or self.eventType == 'HYBRID':
             self.count = int(er.find('count').text)
 
-	if self.type == 'timed':
+	if self.eventType == 'timed' or self.eventType == 'HYBRID':
             self.time = int(er.find('time').text)
+
+#	print self.id, self.name, self.eventType, self.actionType, self.action, self.count, self.time
 
 
     def getEventName(self):
@@ -49,15 +48,14 @@ class EventsTable:
     policyFilePath = None
 
     def __init__(self, policyFile):
-        policyTree = None #ceTree.parse(policyFile)
+        policyTree = ceTree.parse(policyFile)
 
 	if policyTree == None:
-            print policyFile
             sys.exit(1)
 
 	allSpace = [ space for space in policyTree.findall('eventSpace') ]
-	for app in policyTree.findall('application'): 
-            for eventSpace in app.findall('eventSpace'):
+	for app in policyTree.findall('eventSpace'): 
+            for eventSpace in app.findall('application'):
                 self.addToTable(eventSpace)		
 
     def addToTable(self, es):
@@ -119,11 +117,9 @@ class FTBEventPolicy(FTB):
 	policyFile = None
 	for config in configTree.findall("monitorConfig"):
             if config.get('id') != configInstance:
-		print configInstance, config.get('id')
 		continue
             
             for param in config.findall('policyFilePath'):
-		print param.text
 		policyFile = open(param.text, 'r')
 
 	return policyFile
@@ -138,9 +134,9 @@ class FTBEventPolicy(FTB):
 
     def getPolicyDefinitions(self):
 	policyDefinitions = {}
-#	est = self.et.getEventsTable()
-	# for event in est:
-        #     policyDefinitions.update({event.name : event})
+	est = self.et.getEventsTable()
+	for event in est:
+            policyDefinitions.update({event.name : event})
 
 	return policyDefinitions
     
@@ -152,5 +148,5 @@ if __name__=='__main__':
 
     for er in et:
         print er.eventSpaceId, er.eventSpaceName, \
-            er.id, er.name, er.type, er.action, er.count, er.time
+            er.id, er.name, er.eventType, er.action, er.count, er.time
     
