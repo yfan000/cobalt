@@ -3,7 +3,7 @@
  <eventSpace eventSpaceName="FTB.COBALT.DEMO">
   <application name="IPS">
    <event id="1" type="SINGLE" comment="Single type event">
-    <eventName>SINGLE_FAIL</eventName>
+    <eventName>NODE_FAIL</eventName>
     <action type="MESSAGE">
      <command>SINGLE_FAIL occured</command>
     </action>

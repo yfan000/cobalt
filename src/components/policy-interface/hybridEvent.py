@@ -5,7 +5,7 @@ import time, sys, random
 from ftb import *
 
 ftb = FTB()
-event='TIMED_FAIL'
+event='HYBRID_FAIL'
 
 ftb.FTB_Connect("0.5", "FTB.COBALT.DEMO", "app03", "0", "FTB_SUBSCRIPTION_NONE", 0)
 ftb.FTB_Declare_publishable_events( None, [ [event, "INFO"] ], 1);
@@ -21,8 +21,5 @@ while True:
 	sleepDuration = random.randint(0,10)
 	print ' Sleeping for %d msec' % (sleepDuration * 1000)
 	time.sleep(sleepDuration)
-# 	ehandle = ftb.FTB_event_handle_t()
-# 	ftb.FTB_Publish("E02",ehandle);
-# 	print 'Published: E02' 
-# 	time.sleep(2)
+
 

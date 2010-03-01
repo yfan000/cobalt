@@ -27,7 +27,7 @@ class EventTuple:
 	if self.eventType == 'MULTIPLE' or self.eventType == 'HYBRID':
             self.count = int(er.find('count').text)
 
-	if self.eventType == 'timed' or self.eventType == 'HYBRID':
+	if self.eventType == 'TIMED' or self.eventType == 'HYBRID':
             self.time = int(er.find('time').text)
 
 
