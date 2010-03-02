@@ -71,19 +71,19 @@ class EventMonitor():
 
 
     def printDebug(self, ea, ce):
-	print '(DEBUG) Sequence Number: %s' % ce.seqnum
-	print '(DEBUG) Event: %s' % ea.name
-	print '(DEBUG) EventType: %s' % ea.eventType
-	print '(DEBUG) Client Name: %s' % ce.client_name
-	print '(DEBUG) Host: %s' % ce.incoming_src.hostname
-	print '(DEBUG) JobID: %s' % ce.client_jobid
-	print '(DEBUG) Client Extension: %s' % ce.client_extension
-	print '(DEBUG) Payload: %s' % ce.event_payload
-	print '(DEBUG) PID: %s' % ce.incoming_src.pid
-	print '(DEBUG) Process start time: %s' % ce.incoming_src.pid_starttime
+	print '(LOG) Sequence Number: %s' % ce.seqnum
+	print '(LOG) Event: %s' % ea.name
+	print '(LOG) EventType: %s' % ea.eventType
+	print '(LOG) Client Name: %s' % ce.client_name
+	print '(LOG) Host: %s' % ce.incoming_src.hostname
+	print '(LOG) JobID: %s' % ce.client_jobid
+	print '(LOG) Client Extension: %s' % ce.client_extension
+	print '(LOG) Payload: %s' % ce.event_payload
+	print '(LOG) PID: %s' % ce.incoming_src.pid
+	print '(LOG) Process start time: %s' % ce.incoming_src.pid_starttime
 
         if ea.actionType == 'MESSAGE':
-            print '(DEBUG)Action: %s' % (ea.action)
+            print '(LOG) Action: %s' % (ea.action)
         elif ea.actionType == 'EXECUTION':
             os.system(ea.action)
 
@@ -108,7 +108,9 @@ class EventMonitor():
 
     timedEventMap = {}
     def processTimedTypeEvent(self, ea, ce):
-	eventKey = ce.incoming_src.hostname + '-' + str(ce.incoming_src.pid)
+	eventKey = ce.incoming_src.hostname + '-' + \
+			 str(ce.incoming_src.pid) + '-' + ea.name 
+
         curTime = time.time()
 	
 	if not eventKey in self.timedEventMap:
@@ -120,24 +122,37 @@ class EventMonitor():
             self.timedEventMap[eventKey] = curTime
             deltaMiliSec = deltaTime * 1000
             if deltaMiliSec < int(ea.time):
-		print '(DEBUG) eventKey: %s' % (eventKey)
+		print '(LOG) eventKey: %s' % (eventKey)
 		self.printDebug(ea, ce)
 
 
+    hybridEventTimeLists = {}
     def processHybridTypeEvent(self, ea, ce):
-	eventKey = ce.incoming_src.hostname + '-' + str(ce.incoming_src.pid)
+	eventKey = ce.incoming_src.hostname + '-' + \
+			 str(ce.incoming_src.pid) + '-' + ea.name 
         curTime = time.time()
 	
-	if not eventKey in self.timedEventMap:
-            print 'DEBUG: First occurence of \'%s\'' % (eventKey)
+	if not eventKey in self.hybridEventTimeLists:
+            print '(LOG) First occurence of \'%s\'' % (eventKey)
+            newTimeList = []
+            newTimeList.append(curTime)
+            self.hybridEventTimeLists.update({eventKey: newTimeList})
             self.timedEventMap.update({eventKey: curTime})
 	else:
-            prevTime = self.timedEventMap[eventKey]
-            deltaTime = curTime - self.timedEventMap[eventKey]
-            self.timedEventMap[eventKey] = curTime
+            thisEventTimeList = self.hybridEventTimeLists[eventKey]
+            thisEventTimeList.append(curTime)
+            curIdx = len(thisEventTimeList) - 1
+            trackStartTimeIdx = curIdx - int(ea.count)
+
+	    if trackStartTimeIdx < 0:
+		return
+            
+            deltaTime = curTime - thisEventTimeList[trackStartTimeIdx]
             deltaMiliSec = deltaTime * 1000
-            if deltaMiliSec < int(ea.time) and ((int(ce.seqnum) % int(ea.count)) == 0):
-		print '(DEBUG) eventKey: %s' % (eventKey)
+            if deltaMiliSec < int(ea.time):
+                self.timedEventMap[eventKey] = curTime
+		print '(LOG) eventKey: %s' % (eventKey)
+		print '(LOG) deltaTime: %d' % (deltaMiliSec)
 		self.printDebug(ea, ce)
 
 
