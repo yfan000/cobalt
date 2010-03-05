@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import time, sys, os
+
 from FTBEventPolicy import *
 
 class EventMonitor():
@@ -71,16 +72,17 @@ class EventMonitor():
 
 
     def printDebug(self, ea, ce):
-	print '(LOG) Sequence Number: %s' % ce.seqnum
-	print '(LOG) Event: %s' % ea.name
-	print '(LOG) EventType: %s' % ea.eventType
-	print '(LOG) Client Name: %s' % ce.client_name
-	print '(LOG) Host: %s' % ce.incoming_src.hostname
-	print '(LOG) JobID: %s' % ce.client_jobid
-	print '(LOG) Client Extension: %s' % ce.client_extension
-	print '(LOG) Payload: %s' % ce.event_payload
-	print '(LOG) PID: %s' % ce.incoming_src.pid
-	print '(LOG) Process start time: %s' % ce.incoming_src.pid_starttime
+	print '(LOG) Sequence Number: \033[91m%s\033[0m' % ce.seqnum
+	print '(LOG) Event: \033[92m%s\033[0m' % ea.name
+	print '(LOG) EventType: \033[93m%s\033[0m' % ea.eventType
+	print '(LOG) Client Name: \033[94m%s\033[0m' % ce.client_name
+	print '(LOG) Host: \033[95m%s\033[0m' % ce.incoming_src.hostname
+	print '(LOG) JobID: \033[91m%s\033[0m' % ce.client_jobid
+	print '(LOG) Client Extension: \033[92m%s\033[0m' % ce.client_extension
+	print '(LOG) Payload: \033[93m%s\033[0m' % ce.event_payload
+	print '(LOG) PID: \033[94m%s\033[0m' % ce.incoming_src.pid
+	print '(LOG) Process start time: \033[95m%s\033[0m' % \
+				ce.incoming_src.pid_starttime
 
         if ea.actionType == 'MESSAGE':
             print '(LOG) Action: %s' % (ea.action)
@@ -131,6 +133,7 @@ class EventMonitor():
 	eventKey = ce.incoming_src.hostname + '-' + \
 			 str(ce.incoming_src.pid) + '-' + ea.name 
         curTime = time.time()
+	sampleCounts = ea.count + 1
 	
 	if not eventKey in self.hybridEventTimeLists:
             print '(LOG) First occurence of \'%s\'' % (eventKey)
@@ -141,16 +144,15 @@ class EventMonitor():
 	else:
             thisEventTimeList = self.hybridEventTimeLists[eventKey]
             thisEventTimeList.append(curTime)
-            curIdx = len(thisEventTimeList) - 1
-            trackStartTimeIdx = curIdx - int(ea.count)
-
-	    if trackStartTimeIdx < 0:
-		return
             
-            deltaTime = curTime - thisEventTimeList[trackStartTimeIdx]
+            if len(thisEventTimeList) > sampleCounts:
+		del thisEventTimeList[0]
+            elif len(thisEventTimeList) < sampleCounts:
+		return 
+            
+            deltaTime = curTime - thisEventTimeList[0]
             deltaMiliSec = deltaTime * 1000
             if deltaMiliSec < int(ea.time):
-                self.timedEventMap[eventKey] = curTime
 		print '(LOG) eventKey: %s' % (eventKey)
 		print '(LOG) deltaTime: %d' % (deltaMiliSec)
 		self.printDebug(ea, ce)

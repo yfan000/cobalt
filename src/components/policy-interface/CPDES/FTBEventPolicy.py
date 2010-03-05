@@ -51,7 +51,7 @@ class EventsTable:
 	if policyTree == None:
             sys.exit(1)
 
-	allSpace = [ space for space in policyTree.findall('eventSpace') ]
+	allSpace = [ space for space in policyTree.findall('eventSpace') ] 
 	for app in policyTree.findall('eventSpace'): 
             for eventSpace in app.findall('application'):
                 self.addToTable(eventSpace)		

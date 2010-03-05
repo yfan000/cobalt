@@ -226,8 +226,8 @@ class FTB(object):
         if (event_type == 0 and event_payload == ""):
             ret = libftb.FTB_Publish(self.handle, event_name, 0, byref(event_handle))
         else:
-            event_properties.event_type = event_type
-            event_properties.event_payload = event_payload
+#            event_properties.event_type = event_type
+#            event_properties.event_payload = event_payload
             ret = libftb.FTB_Publish(self.handle, self.event_name, byref(self.event_properties), byref(event_handle))
         if ret != FTB_SUCCESS:
             print "FTB_Publish failed. Return code=", self.ret
@@ -278,7 +278,7 @@ class FTB(object):
     def FTB_Get_event_handle(self, receive_event, event_handle):
         self.receive_event = receive_event
         self.event_handle = event_handle
-        seld.ret = libftb.FTB_Get_event_handle(self.receive_event, byref(event_handle))
+        self.ret = libftb.FTB_Get_event_handle(self.receive_event, byref(event_handle))
         if self.ret != FTB_SUCCESS:
             print "FTB_Get_event_handles failed. Return code =", self.ret
             sys.exit()
