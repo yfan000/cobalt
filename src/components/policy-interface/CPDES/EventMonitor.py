@@ -86,7 +86,11 @@ class EventMonitor():
 
         if ea.actionType == 'MESSAGE':
             print '(LOG) Action: %s' % (ea.action)
-        elif ea.actionType == 'EXECUTION':
+        elif ea.actionType == 'EXEC-ENV':
+            allEnvs = ce.event_payload.split(';')
+            for env in allEnvs:
+		var = env.split('=')
+		os.putenv(var[0], var[1])
             os.system(ea.action)
 
 	print

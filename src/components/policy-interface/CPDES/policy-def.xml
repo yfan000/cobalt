@@ -26,8 +26,8 @@
     <eventName>HYBRID_FAIL</eventName>
     <count>3</count>
     <time>10000</time>
-    <action type="EXECUTION">
-     <command>echo 'HYBRID_FAIL occured'</command>
+    <action type="EXEC-ENV">
+     <command>echo $PARTITION</command>
     </action>
    </event>
   </application>
