@@ -220,15 +220,15 @@ class FTB(object):
 		self.ret = libftb.FTB_Declare_publishable_events(self.handle, schema_file, None, num_events)
 
 # User needs to be returned the event handle
-    def FTB_Publish(self, event_name, event_handle,event_payload="", event_type=0):
+    def FTB_Publish(self, event_name, event_handle,event_payload="", event_type="0"):
         event_properties = FTB_event_properties_t()
         #self.event_handle = event_handle
-        if (event_type == 0 and event_payload == ""):
+        if (event_type == "0" and event_payload == ""):
             ret = libftb.FTB_Publish(self.handle, event_name, 0, byref(event_handle))
         else:
             event_properties.event_type = event_type
             event_properties.event_payload = event_payload
-            ret = libftb.FTB_Publish(self.handle, self.event_name, byref(self.event_properties), byref(event_handle))
+            ret = libftb.FTB_Publish(self.handle, event_name, byref(event_properties), byref(event_handle))
         if ret != FTB_SUCCESS:
             print "FTB_Publish failed. Return code=", self.ret
             sys.exit()

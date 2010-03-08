@@ -16,7 +16,8 @@ ftb.FTB_Declare_publishable_events( None, [ [event, "INFO"] ], 1);
 while True:
 	random.seed(time.time())
 	ehandle = ftb.FTB_event_handle_t()
-	ftb.FTB_Publish(event, ehandle);
+	event_payload = 'test'
+	ftb.FTB_Publish(event, ehandle, "test");
 	print 'Published: %s' % (event),   
 	sleepDuration = random.randint(0,10)
 	print ' Sleeping for %d msec' % (sleepDuration * 1000)
