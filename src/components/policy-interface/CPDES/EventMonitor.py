@@ -11,6 +11,9 @@ class EventMonitor():
     jobID = None
     subscriptionStyle = None
     queueLen = 0
+    totalEventCount = 0
+    numOfSamples = 10000
+    outFile = None
 
     ftbEventPolicy = None
     policyDefinitions = {}
@@ -23,6 +26,11 @@ class EventMonitor():
     def loadConfiguration(self):
 	configFile = open(configFileName, 'r')
 	configTree = ceTree.parse(configFile)
+
+	self.outFile = open(sys.argv[1], 'w+')
+	if self.outFile == None:
+            print 'Cannot open file'
+            sys.exit(1)
 
 	policyFile = None
 	for config in configTree.findall("monitorConfig"):
@@ -53,6 +61,16 @@ class EventMonitor():
 					       self.pollingQueueLen)
 	return sHandle
 
+
+    def doBenchmarkStuff(self):
+	self.totalEventCount += 1
+	
+	if self.totalEventCount == 1 or self.totalEventCount == self.numOfSamples:
+            self.outFile.write(str(time.time()) + '\n')
+
+	if self.totalEventCount == self.numOfSamples:
+	    sys.exit(0)	
+
     def startMonitor(self, sHandle):
 	self.policyDefinitions = self.ftbEventPolicy.getPolicyDefinitions()
 
@@ -60,6 +78,9 @@ class EventMonitor():
 	    cEvent, ret = self.ftbEventPolicy.pollEvent(sHandle)
 	    if ret != FTB_SUCCESS:
 		continue
+
+            self.doBenchmarkStuff()
+
 	    eventAttrib = self.policyDefinitions[cEvent.event_name]
             if eventAttrib.eventType == 'MULTIPLE':
 		self.processMultipleTypeEvent(eventAttrib, cEvent)
