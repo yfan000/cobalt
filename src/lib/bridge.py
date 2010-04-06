@@ -1052,8 +1052,16 @@ bridge.rm_free_job.restype = check_status
 bridge.jm_signal_job.argtypes = [db_job_id_t, rm_signal_t]
 bridge.jm_signal_job.restype = check_status
 
+def signal_job(db_id, signum):
+    status = bridge.jm_signal_job(db_id, rm_signal_t(signum))
+    return status
+
 bridge.jm_cancel_job.argtypes = [db_job_id_t]
 bridge.jm_cancel_job.restype = check_status
+
+def cancel_job(db_id):
+    status = bridge.jm_cancel_job(db_id)
+    return status
 
 class Job (Resource):
     
@@ -1069,13 +1077,11 @@ class Job (Resource):
         if self._free:
             bridge.rm_free_job(self)
     
-    def signal (self, signalnum):
-        status = bridge.jm_signal_job(self.db_id, rm_signal_t(signalnum))
-        return status
+    def signal (self, signum):
+        return signal_job(self.db_id, signnum)
     
     def cancel (self):
-        status = bridge.jm_cancel_job(self.db_id)
-        return status
+        return cancel_job(self.db_id)
 
     def _get_id (self):
         id = self._get_data(RM_JobID, rm_job_id_t)
