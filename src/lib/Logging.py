@@ -16,6 +16,8 @@ import types
 import linecache
 import Cobalt
 import ConfigParser
+from Cobalt import sayMessage
+import traceback
 
 SYSLOG_LEVEL_DEFAULT = "DEBUG"
 CONSOLE_LEVEL_DEFAULT = "INFO"
@@ -26,7 +28,7 @@ LOGGING_LEVELS = {
     "WARNING" : logging.WARNING,
     "ERROR" : logging.ERROR,
     "CRITICAL" : logging.CRITICAL,
-    }
+}
 
 config = ConfigParser.ConfigParser()
 config.read(Cobalt.CONFIG_FILES)
@@ -103,6 +105,66 @@ def xml_print(element, running_indent=0, indent=4):
         if element.tail:
             ret += (' ' * child_indent) + print_text(element.tail)
     return ret
+
+if sys.version_info[0] + sys.version_info[1]/1000.0 + sys.version_info[2]/1000000.0 < 2.006000:
+    class LoggerAdapter (object):
+        def __init__(self, logger, extra):
+            self._logger = logger
+            self._extra = extra
+    
+        def process(self, msg, kwargs):
+            new_kwargs = copy.copy(kwargs)
+            new_kwargs['extra'] = self._extra
+            return msg, kwargs
+    
+        def debug(self, msg, *args, **kwargs):
+            msg, kwargs = self.process(msg, kwargs)
+            self._logger.debug(msg, *args, **kwargs)
+    
+        def info(self, msg, *args, **kwargs):
+            msg, kwargs = self.process(msg, kwargs)
+            self._logger.info(msg, *args, **kwargs)
+    
+        def warning(self, msg, *args, **kwargs):
+            msg, kwargs = self.process(msg, kwargs)
+            self._logger.warning(msg, *args, **kwargs)
+    
+        def error(self, msg, *args, **kwargs):
+            msg, kwargs = self.process(msg, kwargs)
+            self._logger.error(msg, *args, **kwargs)
+    
+        def exception(self, msg, *args, **kwargs):
+            msg, kwargs = self.process(msg, kwargs)
+            self._logger.exception(msg, *args, **kwargs)
+    
+        def critical(self, msg, *args, **kwargs):
+            msg, kwargs = self.process(msg, kwargs)
+            self._logger.critical(msg, *args, **kwargs)
+    
+        def log(self, level, msg, *args, **kwargs):
+            msg, kwargs = self.process(msg, kwargs)
+            self._logger.log(level, msg, *args, **kwargs)
+
+    logging.LoggerAdapter = LoggerAdapter
+
+class ClassLogger (logging.LoggerAdapter):
+    def __init__(self, logger, cls):
+        logging.LoggerAdapter.__init__(self, logger, {})
+        try:
+            self.clsname = cls.__clsname
+        except AttributeError:
+            self.clsname = cls.__name__
+
+    def process(self, msg, kwargs):
+        new_kwargs = copy.copy(kwargs)
+        if not new_kwargs.has_key('extra'):
+            new_kwargs['extra'] = {}
+        new_kwargs['extra']['cls_name'] = self.clsname
+        try:
+            new_kwargs['extra']['method_name'] = sys._getframe(2).f_code.co_name
+        except:
+            new_kwargs['extra']['method_name'] = '<unknown>'
+        return msg, new_kwargs
 
 class TermiosFormatter(logging.Formatter):
     '''The termios formatter displays output in a terminal-sensitive fashion'''
@@ -200,6 +262,24 @@ class FragmentingSysLogHandler(logging.handlers.SysLogHandler):
                         continue
                     self.socket.send("Reconnected to syslog")
                     self.socket.send(msg)
+
+class SayMessageHandler (logging.Handler):
+    '''This handler outputs message using IBM's sayMessage API'''
+    def __init__(self, **kwargs):
+        logging.Handler.__init__(self, **kwargs)
+    
+    def emit(self, record):
+        try:
+            funcname = "%s.%s" % (record.cls_name, record.method_name)
+        except AttributeError:
+            funcname = record.funcName
+            if funcname == "<module>":
+                funcname = "main"
+        sayMessage.sayMessage(record.name, sayMessage.get_message_type(record.levelno), funcname, self.format(record))
+
+    def setLevel(self, level):
+        logging.Handler.setLevel(self, level)
+        sayMessage.setSayMessageLevel(sayMessage.get_message_type(level))
 
 def setup_logging(procname, to_console=TO_CONSOLE, to_syslog=TO_SYSLOG, syslog_facility=SYSLOG_FACILITY, level=0):
     '''setup logging for bcfg2 software'''
