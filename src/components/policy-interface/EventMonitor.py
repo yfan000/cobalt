@@ -3,6 +3,9 @@
 import time, sys
 from FTBEventPolicy import *
 
+totalEventCount = 0
+numOfSamples = 10
+
 class EventMonitor():
     ftbEventPolicy = None
     policyDefinitions = {}
@@ -10,6 +13,7 @@ class EventMonitor():
     def __init__(self):
 	sHandle = self.doRegister()
 	self.startMonitor(sHandle)
+	self.outFile = open(sys.argv[1], 'w+')
 
     def doRegister(self):
 	self.ftbEventPolicy = FTBEventPolicy()
@@ -21,6 +25,15 @@ class EventMonitor():
                        0)
 	return sHandle
 
+    def doBenchmarkStuff(self):
+	totalEventCount += 1
+	
+	if totalEventCount == 1 or totalCount == numOfSamples:
+            self.outFile.write(time.time())
+
+	if totalCount == numOfSamples:
+	    sys.exit(0)	
+
     def startMonitor(self, sHandle):
 	self.policyDefinitions = self.ftbEventPolicy.getPolicyDefinitions()
 
@@ -28,6 +41,9 @@ class EventMonitor():
 	    cEvent, ret = self.ftbEventPolicy.pollEvent(sHandle)
 	    if ret != FTB_SUCCESS:
 		continue
+ 
+            doBenchmarkStuff()
+
 	    eventAttrib = self.policyDefinitions[cEvent.event_name]
             if eventAttrib.type == 'multiple':
 		self.processMultipleTypeEvent(eventAttrib, cEvent)
