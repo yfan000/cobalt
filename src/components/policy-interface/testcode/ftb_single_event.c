@@ -7,6 +7,8 @@
 
 static volatile int done = 0;
 
+static unsigned long int count_events = 0;
+
 void Int_handler(int sig)
 {
 	if (sig == SIGINT)
@@ -19,6 +21,13 @@ int main(int argc, char *argv[])
 	FTB_client_handle_t handle;
 	FTB_subscribe_handle_t shandle;
 	int ret = 0;
+
+	if(argc != 2) {
+		fprintf(stderr, "%s <number-of-events>\n", argv[0]);
+		exit(1);
+	}
+
+	const unsigned long int count_limit = atoi(argv[1]);
 
 	memset(&cinfo, 0, sizeof(cinfo));
 	strcpy(cinfo.event_space, "FTB.COBALT.DEMO");
@@ -41,7 +50,7 @@ int main(int argc, char *argv[])
 	}
 
 	srandom(time(NULL));
-	while (1) {
+	while (count_events < count_limit) {
 		ret = 0;
 		FTB_event_properties_t *property;
 		FTB_event_handle_t ehandle;
@@ -59,9 +68,9 @@ int main(int argc, char *argv[])
 			exit(-1);
 		}
 
-		const int interval = random() % 10;
-		printf("HYBRID_FAIL, Sleeping %d msecs\n", interval * 1000);
-		sleep(interval);
+		/* const int interval = random() % 10; */
+		printf("NODE_FAIL number: %lu\n", ++count_events);
+		/* sleep(interval); */
 
 	}
 

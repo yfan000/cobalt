@@ -1,17 +1,24 @@
 CC=gcc
-FTB_HOME=/home/hnaik/devel/ftb
+FTB_HOME=/home/hnaik/devel/ftb/install
 CFLAGS=-I$(FTB_HOME)/include
 LDFLAGS=-L$(FTB_HOME)/lib -lftb -lpthread
 
-TARGETS=ftb_hybrid_event ftb_single_event
+TARGETS=ftb_hybrid_event \
+	ftb_single_event \
+	ftb_multiple_event \
+	timed \
+	hybrid \
+	multiple_1 \
+	multiple_2 \
+	multiple_4 \
+	multiple_8 \
+	multiple_16
+
 
 all: $(TARGETS)
 
-ftb_hybrid_event: ftb_hybrid_event.c
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
-
-ftb_single_event: ftb_single_event.c
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+%: %.c
+	$(CC) -g $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 clean:
 	rm -f $(TARGETS) *~

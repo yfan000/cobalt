@@ -4,30 +4,74 @@
   <application name="IPS">
    <event id="1" type="SINGLE" comment="Single type event">
     <eventName>NODE_FAIL</eventName>
-    <action type="MESSAGE">
-     <command>SINGLE_FAIL occured</command>
+    <action type="EXEC-ENV">
+     <command>echo 'SINGLE_FAIL occured'</command>
     </action>
    </event>
    <event id="2" type="MULTIPLE" comment="Multiple type event">
-    <eventName>MULTIPLE_FAIL</eventName>
-    <count>5</count>
-    <action type="EXECUTION">
+    <eventName>MULTIPLE_FAIL_1</eventName>
+    <count>1</count>
+    <action type="EXEC-ENV">
      <command>echo 'MULTIPLE_FAIL occured'</command>
     </action>
    </event>
-   <event id="3" type="TIMED" comment="Timed event">
+   <event id="3" type="MULTIPLE" comment="Multiple type event">
+    <eventName>MULTIPLE_FAIL_2</eventName>
+    <count>2</count>
+    <action type="EXEC-ENV">
+     <command>echo 'MULTIPLE_FAIL occured'</command>
+    </action>
+   </event>
+   <event id="4" type="MULTIPLE" comment="Multiple type event">
+    <eventName>MULTIPLE_FAIL_4</eventName>
+    <count>4</count>
+    <action type="EXEC-ENV">
+     <command>echo 'MULTIPLE_FAIL occured'</command>
+    </action>
+   </event>
+   <event id="5" type="MULTIPLE" comment="Multiple type event">
+    <eventName>MULTIPLE_FAIL_8</eventName>
+    <count>8</count>
+    <action type="EXEC-ENV">
+     <command>echo 'MULTIPLE_FAIL occured'</command>
+    </action>
+   </event>
+   <event id="6" type="MULTIPLE" comment="Multiple type event">
+    <eventName>MULTIPLE_FAIL_16</eventName>
+    <count>16</count>
+    <action type="EXEC-ENV">
+     <command>echo 'MULTIPLE_FAIL occured'</command>
+    </action>
+   </event>
+   <event id="7" type="TIMED" comment="Timed event">
     <eventName>TIMED_FAIL</eventName>
     <time>5000</time>
-    <action type="EXECUTION">
+    <action type="EXEC-SIMPLE">
      <command>echo 'TIMED_FAIL occured'</command>
     </action>
    </event>
-   <event id="4" type="HYBRID" comment="Multiple failure within time limit">
+   <event id="8" type="HYBRID" comment="Multiple failure within time limit">
     <eventName>HYBRID_FAIL</eventName>
     <count>3</count>
     <time>10000</time>
     <action type="EXEC-ENV">
      <command>echo $PARTITION</command>
+    </action>
+   </event>
+   <event id="9" type="HYBRID" comment="Hybrid">
+    <eventName>HYBRID_FAIL_9</eventName>
+    <count>2</count>
+    <time>10000</time>
+    <action type="EXEC-SIMPLE">
+     <command>echo 'HYBRID_FAIL_9'</command>
+    </action>
+   </event>
+   <event id="10" type="HYBRID" comment="Hybrid">
+    <eventName>HYBRID_FAIL_10</eventName>
+    <count>4</count>
+    <time>10000</time>
+    <action type="EXEC-SIMPLE">
+     <command>echo 'HYBRID_FAIL_9'</command>
     </action>
    </event>
   </application>
