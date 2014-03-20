@@ -1253,7 +1253,9 @@ class BGBaseSystem (Component):
         '''Set the backfill times for a block.  These get used in both the calculation of the backfill window
         as well as being used to select drain blocks.
 
-        This will side-effect the blocks, and return a new set of backfill times on said blocks. It will also clear the draining flag (set to False)
+        This will side-effect the blocks, and return a new set of backfill times on said blocks. It will also clear the draining
+        flag (set to False)
+
         now is the time to use as the starting point of this drain window
         minimum_not_idle is a minimum delta in seconds to add to now for non-idle non-job blocks
         job_end_times is a dict of block_location:job_end_time.  All times for this function are in seconds from epoch.
@@ -1285,15 +1287,17 @@ class BGBaseSystem (Component):
         # the backfill time to children.  Do so if the child is either immediately available
         # or if the child has a longer backfill time that the block does.
         # is this backwards?
+        #Changed so that if a child will have largest blocking time.
         for p in blocks.itervalues():
             if p.backfill_time == now:
                 continue
             for child in p._children:
                 child_block = child
-                if child_block.backfill_time == now  or child_block.backfill_time > p.backfill_time:
+                if child_block.backfill_time == now  or child_block.backfill_time < p.backfill_time:
                     child_block.backfill_time = p.backfill_time
 
-        #Go back through, if we're actually running a job on a block, all of it's children should have timese set to the greater of their current time or the parent block's time
+        #Go back through, if we're actually running a job on a block, all of it's children should have times set to the greater
+        #of their current time or the parent block's time
         for name in job_end_times.iterkeys():
             job_block = blocks[name]
             for child in job_block._children:
