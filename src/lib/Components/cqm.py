@@ -530,19 +530,13 @@ class Job (StateMachine):
     end = property(lambda self: self.__timers['user'].stop_times[-1])
 
     fields = Data.fields + [
-        "jobid", "jobname", "state", "attribute", "location", "starttime", 
-        "submittime", "endtime", "queue", "type", "user",
-        "walltime", "procs", "nodes", "mode", "cwd", "command", "args", 
-        "outputdir", "project", "lienID", "stagein", "stageout",
-        "reservation", "host", "port", "url", "stageid", "envs", "inputfile", 
-        "kernel", "kerneloptions", "ion_kernel", "ion_kerneloptions", "admin_hold",
-        "user_hold", "dependencies", "notify", "adminemail", "outputpath",
-        "errorpath", "cobalt_log_file", "path", "preemptable", "preempts",
-        "mintasktime", "maxtasktime", "maxcptime", "force_kill_delay", 
-        "is_runnable", "is_active",
-        "has_completed", "sm_state", "score", "attrs", "has_resources", 
-        "exit_status", "dep_frac", "walltime_p", "user_list", "runid",
-        "geometry"
+        "jobid", "jobname", "state", "a ttribute", "location", "starttime", "submittime", "endtime", "queue", "type", "user",
+        "walltime", "procs", "nodes", "mode", "cwd", "command", "args", "outputdir", "project", "lienID", "stagein", "stageout",
+        "reservation", "host", "port", "url", "stageid", "envs", "inputfile", "kernel", "kerneloptions", "ion_kernel",
+        "ion_kerneloptions", "admin_hold", "accounting_hold" "user_hold", "dependencies", "notify", "adminemail", "outputpath",
+        "errorpath", "cobalt_log_file", "path", "preemptable", "preempts", "mintasktime", "maxtasktime", "maxcptime",
+        "force_kill_delay", "is_runnable", "is_active", "has_completed", "sm_state", "score", "attrs", "has_resources",
+        "exit_status", "dep_frac", "walltime_p", "user_list", "runid", "geometry"
     ]
 
     _states = get_job_sm_states() + StateMachine._states
@@ -648,6 +642,7 @@ class Job (StateMachine):
 
         self.__admin_hold = False
         self.__user_hold = False
+        self.__accounting_hold = False
 
         self.score = float(spec.get("score", 0.0))
 
@@ -673,6 +668,8 @@ class Job (StateMachine):
             self.admin_hold = True
         if spec.get("user_hold", False):
             self.user_hold = True
+        if spec.get("accounting_hold", False):
+            self.accounting_hold = True
 
         self.total_etime = 0.0
         self.priority_core_hours = None
@@ -707,9 +704,10 @@ class Job (StateMachine):
     # end def __init__()
 
     def no_holds_left(self):
-        return not (self.admin_hold or 
-                self.user_hold or 
-                self.has_dep_hold or 
+        return not (self.admin_hold or
+                self.user_hold or
+                self.accounting_hold or
+                self.has_dep_hold or
                 self.max_running)
 
     def __getstate__(self):
@@ -720,6 +718,7 @@ class Job (StateMachine):
         return data
 
     def __setstate__(self, state):
+        self.initializing = True
         self.__dict__.update(state)
 
         #reset the statemachine's states
@@ -1235,21 +1234,24 @@ class Job (StateMachine):
     def _sm_common_queued__hold(self, hold_state, args):
         '''place a hold on a job in the queued state'''
         if self.__admin_hold:
-            self._sm_raise_exception("admin hold set on a job in the '%s' "
-                    "state", self._sm_state)
+            self._sm_raise_exception("admin hold set on a job in the '%s' state", self._sm_state)
             return
         if self.__user_hold:
-            self._sm_raise_exception("user hold set on a job in the '%s' "
-                    "state", self._sm_state)
+            self._sm_raise_exception("user hold set on a job in the '%s' state", self._sm_state)
+            return
+        if self.__accounting_hold:
+            self._sm_raise_exception("accounting hold set on a job in the '%s' state", self._sm_state)
             return
 
         if args['type'] == 'admin':
             self.__admin_hold = True
         elif args['type'] == 'user':
             self.__user_hold = True
+        elif args['type'] == 'accounting':
+            self.__accounting_hold = True
         else:
-            self._sm_raise_exception("hold type of '%s' is not valid; type "
-                    "must be 'admin' or 'user'" % (args['type'],))
+            self._sm_raise_exception("hold type of '%s' is not valid; type must be in %s" % (args['type'],
+                ['accounting', 'admin', 'user']))
             return
 
         if not self.__timers.has_key('hold'):
@@ -1273,7 +1275,7 @@ class Job (StateMachine):
     def _sm_common_hold__hold(self, args):
         '''place another hold on a job that is already in a hold state'''
         activity = False
-
+        logger.debug('INC HOLD TYPE=%s', args['type'])
         if args['type'] == 'admin':
             if not self.__admin_hold:
                 self.__admin_hold = True
@@ -1282,8 +1284,13 @@ class Job (StateMachine):
             if not self.__user_hold:
                 self.__user_hold = True
                 activity = True
+        elif args['type'] == 'accounting':
+            if not self.__accounting_hold:
+                self.__accounting_hold = True
+                activity = True
         else:
-            self._sm_raise_exception("hold type of '%s' is not valid; type must be 'admin' or 'user'" % (args['type'],))
+            self._sm_raise_exception("hold type of '%s' is not valid; type must be in %s" % (args['type'],
+                ['accounting', 'admin', 'user']))
             return
 
         if activity:
@@ -1291,7 +1298,7 @@ class Job (StateMachine):
         else:
             self._sm_log_info("%s hold already present; ignoring hold request" % (args['type'],), cobalt_log = True)
 
-        '''release a hold previous placed on a job'''
+        #release a hold previous placed on a job
         activity = False
 
     def _sm_common_hold__release(self, queued_state, args):
@@ -1306,8 +1313,13 @@ class Job (StateMachine):
             if self.__user_hold:
                 self.__user_hold = False
                 activity = True
+        elif args['type'] == 'accounting':
+            if self.__accounting_hold:
+                self.__accounting_hold = False
+                activity = True #needed for compensating for "stateless holds"
         else:
-            self._sm_raise_exception("hold type of '%s' is not valid; type must be 'admin' or 'user'" % (args['type'],))
+            self._sm_raise_exception("hold type of '%s' is not valid; type must be in %s" % (args['type'],
+                ['accounting', 'admin', 'user']))
             return
 
         if activity:
@@ -1317,7 +1329,7 @@ class Job (StateMachine):
         else:
             self._sm_log_info("%s hold not present; ignoring release request" % (args['type'],), cobalt_log = True)
 
-        if not self.__admin_hold and not self.__user_hold:
+        if not self.__admin_hold and not self.__user_hold and not self.__accounting_hold:
             self._sm_log_info("no holds remain; releasing job", cobalt_log = True)
             self.__timers['hold'].stop()
             self.etime = time.time()
@@ -1655,9 +1667,13 @@ class Job (StateMachine):
             if not self.__user_hold:
                 self.__user_hold = True
                 activity = True
+        elif args['type'] == 'accounting':
+            if not self.__accounting_hold:
+                self.__accounting_hold = True
+                activity = True
         else:
-            self._sm_raise_exception("hold type of '%s' is not valid; type must" 
-                " be 'admin' or 'user'" % (args['type'],))
+            self._sm_raise_exception("hold type of '%s' is not valid; type must be in %s" % (args['type'],
+                ['accounting', 'admin', 'user']))
             return
 
         if activity:
@@ -1682,6 +1698,10 @@ class Job (StateMachine):
         elif args['type'] == 'user':
             if self.__user_hold:
                 self.__user_hold = False
+                activity = True
+        if args['type'] == 'accounting':
+            if self.__accounting_hold:
+                self.__accounting_hold = False
                 activity = True
         else:
             self._sm_raise_exception("hold type of '%s' is not valid; type "
@@ -2393,7 +2413,7 @@ class Job (StateMachine):
         self.score = 0.0
 
         # if a pending hold exists, then change to the preempted hold state; otherwise change to the preempted state
-        if self.admin_hold or self.user_hold:
+        if self.admin_hold or self.user_hold or self.accounting_hold:
             if not self.__timers.has_key('hold'):
                 self.__timers['hold'] = Timer()
             self.__timers['hold'].start()
@@ -2749,6 +2769,17 @@ class Job (StateMachine):
 
     admin_hold = property(__get_admin_hold, __set_admin_hold)
 
+    def __get_accounting_hold(self):
+        return self.__accounting_hold
+
+    def __set_accounting_hold(self, hold_flag):
+        if hold_flag:
+            self.trigger_event('Hold', {'type' : 'accounting'})
+        else:
+            self.trigger_event('Release', {'type' : 'accounting'})
+
+    accounting_hold = property(__get_accounting_hold, __set_accounting_hold)
+
     def __get_user_hold(self):
         return self.__user_hold
 
@@ -2759,6 +2790,7 @@ class Job (StateMachine):
             self.trigger_event('Release', {'type' : 'user'})
 
     user_hold = property(__get_user_hold, __set_user_hold)
+
 
     def __has_dep_hold(self):    
         current_dep_hold = self.all_dependencies and not set(self.all_dependencies).issubset(set(self.satisfied_dependencies))
@@ -2787,6 +2819,8 @@ class Job (StateMachine):
         if self._sm_state in ['Hold', 'Preempted_Hold']:
             if self.user_hold:
                 return "user_hold"
+            elif self.accounting_hold:
+                return "accounting_hold"
             else:
                 return "admin_hold"
         if self._sm_state in ['Job_Prologue','Job_Prologue_Retry',
@@ -3760,15 +3794,14 @@ class QueueManager(Component):
                 if job.is_active or job.has_completed:
                     raise QueueError, "job %d is running; it cannot be moved" % job.jobid   
 
-
         for job in joblist:
-
             old_q_name = job.queue
             test = job.to_rx()
             test.update(updates)
             #if we are requesting a change in hold:
             set_user_hold = updates.get('user_hold', None)
             set_admin_hold = updates.get('admin_hold', None)
+            set_accounting_hold = updates.get('accounting_hold', None)
 
             if set_admin_hold and not job.admin_hold:
                 dbwriter.log_to_db(user_name, "admin_hold", "job_prog", JobProgMsg(job))
@@ -3783,7 +3816,7 @@ class QueueManager(Component):
             #is always on the list.
             elif 'user_list' in updates.keys():
                 if job.user not in updates['user_list']:
-                    updates['user_list'].insert(0,job.user)
+                    updates['user_list'].insert(0, job.user)
 
 
 
@@ -3796,6 +3829,9 @@ class QueueManager(Component):
                 job.update(updates)
                 only_hold = True
             elif updates.keys() == ['admin_hold']:
+                job.update(updates)
+                only_hold = True
+            elif updates.keys() == ['accounting_hold']:
                 job.update(updates)
                 only_hold = True
 
@@ -4036,8 +4072,12 @@ class QueueManager(Component):
 
         # I think this duplicates cobalt's old scheduling policy
         # higher queue priorities win, with jobid being the tie breaker
+
         def default():
             #this is a vairable that is always being passed in by us.
+            #disabling pylint check for undeclared variable.  This is 
+            #going to be passed in as an argument on eval.
+            # pylint: disable=E0602
             val = queue_priority + 0.1
             return val
 

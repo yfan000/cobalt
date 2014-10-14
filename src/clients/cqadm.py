@@ -49,6 +49,8 @@ Options with no values but with jobid arguments:
 '--admin-release', help='release admin hold for jobids in args', callback=cb_hold
 '--user-hold', help='apply user hold to jobids in args', callback=cb_hold
 '--user-release', help='release user hold for jobids in args', callback=cb_hold
+'--accounting-hold', help='apply accounting hold to jobids in args', callback=cb_hold
+'--accounting-release', help='release accounting hold for jobids in args', callback=cb_hold
 
 Option with values and jobid arguments:
 
@@ -119,7 +121,11 @@ def validate_args(parser, spec, opt_count):
     if hasattr(parser.options, 'user_hold'):
         opt_count += 1
         spec['user_hold'] = parser.options.user_hold
-    
+
+    if hasattr(parser.options, 'accounting_hold'):
+        opt_count += 1
+        spec['accounting_hold'] = parser.options.accounting_hold
+
     # Make sure jobid or queue is supplied for the appropriate commands
     if parser.no_args() and not [opt for opt in spec if opt in opts_wo_args]:
         client_utils.print_usage(parser)
@@ -179,8 +185,14 @@ def setjobs(jobs, parser, spec, user):
             job.update({'admin_hold': not parser.options.admin_hold})
 
     if hasattr(parser.options,'user_hold'):
-        for job in jobs:
-            job.update({'user_hold': not parser.options.user_hold})
+        pass
+        #for job in jobs:
+            #job.update({'user_hold': not parser.options.user_hold})
+
+    if hasattr(parser.options,'accounting_hold'):
+        pass
+        #for job in jobs:
+            #job.update({'accounting_hold': not parser.options.accounting_hold})
 
     return client_utils.component_call(QUEMGR, False, 'set_jobs', (jobs, spec, user))
 
