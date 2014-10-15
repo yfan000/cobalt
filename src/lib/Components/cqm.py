@@ -530,7 +530,7 @@ class Job (StateMachine):
     end = property(lambda self: self.__timers['user'].stop_times[-1])
 
     fields = Data.fields + [
-        "jobid", "jobname", "state", "a ttribute", "location", "starttime", "submittime", "endtime", "queue", "type", "user",
+        "jobid", "jobname", "state", "attribute", "location", "starttime", "submittime", "endtime", "queue", "type", "user",
         "walltime", "procs", "nodes", "mode", "cwd", "command", "args", "outputdir", "project", "lienID", "stagein", "stageout",
         "reservation", "host", "port", "url", "stageid", "envs", "inputfile", "kernel", "kerneloptions", "ion_kernel",
         "ion_kerneloptions", "admin_hold", "accounting_hold" "user_hold", "dependencies", "notify", "adminemail", "outputpath",
