@@ -8,18 +8,55 @@ from datetime import datetime
 from time import mktime
 from logging.handlers import BaseRotatingHandler
 import os
+from Cobalt.PathImporter import import_from_config
 
+
+try:
+    RealTimeAccounting = import_from_config('RTAccounting', 'path', 'module_name')
+except ImportError:
+    import Cobalt.RTAccounting.stub_interface as RealTimeAccounting
+
+#print RealTimeAccounting.fetch_job_status([{'jobid': 12345}])
+import inspect
+from functools import wraps
+
+
+#decorators for job/res information intercepts.
+def _gen_arg_dict(func, *args, **kwargs):
+    '''generate the update dictionary from incoming data to accounting functions'''
+    update_dict = dict(zip(inspect.getargspec(func).args, args))
+    for key, val in kwargs.items():
+        update_dict[key] = val
+    return update_dict
+
+def job_record(func):
+    '''Send job data from tagged messages to the realtime accounting system interface.'''
+    @wraps(func)
+    def send_update(*args, **kwargs):
+        RealTimeAccounting.update_job(_gen_arg_dict(func, *args, **kwargs))
+        return func(*args, **kwargs)
+    return send_update
+
+def reservation_record(func):
+    '''Send reservation data from tagged messages to the realtime accounting system interface.'''
+    @wraps(func)
+    def inner(*args, **kwargs):
+        RealTimeAccounting.update_reservation(_gen_arg_dict(func, *args, **kwargs))
+        return func(*args, **kwargs)
+    return inner
 
 __all__ = ["abort", "begin", "checkpoint", "checkpoint_restart", "delete", "end", "finish",
     "system_remove", "remove", "queue", "rerun", "start", "unconfirmed",
     "confirmed", "DatetimeFileHandler"]
 
 
+#messages to send
+@job_record
 def abort (job_id):
     """Job was aborted by the server."""
     return entry("A", job_id)
 
-
+@reservation_record
 def begin (id_string,
            owner, queue, ctime, start, end, duration,
            exec_host, authorized_users, resource_list,
@@ -60,15 +97,17 @@ def begin (id_string,
         message['authorized_hosts'] = authorized_hosts
     return entry("B", id_string, message)
 
-
+@job_record
 def checkpoint (job_id):
     """Job was checkpointed and held."""
     return entry("C", job_id)
 
+@job_record
 def checkpoint_restart (job_id):
     """Job was restarted from a checkpoint"""
     return entry("T", job_id)
 
+@job_record
 def delete (job_id, requester):
 
     """Job was deleted by request.
@@ -80,7 +119,7 @@ def delete (job_id, requester):
 
     return entry("D", job_id, {'requester':requester})
 
-
+@job_record
 def end (job_id,
          user, group, jobname, queue, cwd, exe, args, mode,
          ctime, qtime, etime, start, exec_host,
@@ -143,12 +182,12 @@ def end (job_id,
 
     return entry("E", job_id, message)
 
-
+@reservation_record
 def finish (reservation_id):
     """Resource reservation period finished."""
     return entry("F", reservation_id)
 
-
+@reservation_record
 def system_remove (reservation_id, requester):
 
     """Scheduler or server requested removal of the reservation.
@@ -160,7 +199,7 @@ def system_remove (reservation_id, requester):
 
     return entry("K", reservation_id, {'requester':requester})
 
-
+@reservation_record
 def remove (reservation_id, requester):
 
     """Resource reservation terminated by ordinary client.
@@ -172,7 +211,7 @@ def remove (reservation_id, requester):
 
     return entry("k", reservation_id, {'requester':requester})
 
-
+@job_record
 def queue (job_id, queue_):
 
     """Job entered a queue.
@@ -184,12 +223,12 @@ def queue (job_id, queue_):
 
     return entry("Q", job_id, {'queue':queue_})
 
-
+@job_record
 def rerun (job_id):
     """Job was rerun."""
     return entry("R", job_id)
 
-
+@job_record
 def start (job_id,
            user, group, jobname, queue, cwd, exe, args, mode,
            ctime, qtime, etime, start, exec_host,
@@ -240,7 +279,7 @@ def start (job_id,
         message['accounting_id'] = accounting_id
     return entry("S", job_id, message)
 
-
+@reservation_record
 def unconfirmed (reservation_id, requester):
 
     """Created unconfirmed resources reservation.
@@ -252,7 +291,7 @@ def unconfirmed (reservation_id, requester):
 
     return entry("U", reservation_id, {'requester':requester})
 
-
+@reservation_record
 def confirmed (reservation_id, requester):
 
     """Created unconfirmed resources reservation.

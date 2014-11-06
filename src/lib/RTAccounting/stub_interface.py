@@ -4,9 +4,12 @@ This is a do-nothing stub useful for testing, or running against accounting syst
 
 
 """
+import logging
 import Cobalt.RTAccounting.Exceptions
 
 STOCK_REASON = "using the stub implementation."
+
+_logger = logging.getLogger(__name__)
 
 def user_default_project(user):
     '''stub implementation for project support.'''
@@ -38,6 +41,7 @@ def verify_job(job_data):
 
 def update_job(job_data, timestamp=None):
     '''do nothing stub interface for job_updates'''
+    _logger.debug("JOB UPDATED with %s %s", job_data, timestamp)
     pass
 
 def verify_reservation(reservation_data):
@@ -52,5 +56,5 @@ def verify_reservation(reservation_data):
 
 def update_reservation(reservation_data, timestamp=None):
     '''STUB: do nothing for reservation updates'''
-    pass
+    _logger.debug("RESERVATION UPDATED with %s %s", reservation_data, timestamp)
 

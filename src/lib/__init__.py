@@ -4,7 +4,7 @@ __revision__ = '$Revision: 1622 $'
 
 __all__ = ['bridge', 'bgl_rm_api', 'Components', 'Data', 'DataTypes',
            'Exceptions', 'Logging', 'Proxy', 'QueueThread', 'Util',
-           'RTAccounting']
+           'RTAccounting', 'PathImporter']
 
 import sys
 import os
