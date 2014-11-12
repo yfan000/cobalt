@@ -1,12 +1,14 @@
 """Handle generation of accounting log records, also known as the PBS logs.
 
 These follow the standard mesasges from the accounting logs in OpenPBS's documentation.
+This is based on the PBS Professional Reference Guide, chapter 9.
 
 """
 
 from datetime import datetime
 from time import mktime
 from logging.handlers import BaseRotatingHandler
+import codecs
 import os
 from Cobalt.PathImporter import import_from_config
 
@@ -33,6 +35,7 @@ def job_record(func):
     '''Send job data from tagged messages to the realtime accounting system interface.'''
     @wraps(func)
     def send_update(*args, **kwargs):
+        '''send job update information based on function's arguments'''
         RealTimeAccounting.update_job(_gen_arg_dict(func, *args, **kwargs))
         return func(*args, **kwargs)
     return send_update
@@ -41,6 +44,7 @@ def reservation_record(func):
     '''Send reservation data from tagged messages to the realtime accounting system interface.'''
     @wraps(func)
     def inner(*args, **kwargs):
+        '''send reservation update information based on function's arguments'''
         RealTimeAccounting.update_reservation(_gen_arg_dict(func, *args, **kwargs))
         return func(*args, **kwargs)
     return inner
@@ -57,11 +61,8 @@ def abort (job_id):
     return entry("A", job_id)
 
 @reservation_record
-def begin (id_string,
-           owner, queue, ctime, start, end, duration,
-           exec_host, authorized_users, resource_list,
-           name=None, account=None, authorized_groups=None,
-           authorized_hosts=None):
+def begin (id_string, owner, queue, ctime, start, end, duration, exec_host, authorized_users, resource_list, name=None,
+        account=None, authorized_groups=None, authorized_hosts=None):
 
     """Beginning of reservation period.
 
@@ -84,8 +85,7 @@ def begin (id_string,
     authorized_hosts -- the list of acl_hosts on the reservation queue
     """
 
-    message = {'owner':owner, 'queue':queue, 'ctime':ctime, 'start':start,
-        'end':end, 'duration':duration, 'exec_host':exec_host,
+    message = {'owner':owner, 'queue':queue, 'ctime':ctime, 'start':start, 'end':end, 'duration':duration, 'exec_host':exec_host,
         'authorized_users':authorized_users, 'Resource_List':resource_list}
     if name is not None:
         message['name'] = name
@@ -120,8 +120,7 @@ def delete (job_id, requester):
     return entry("D", job_id, {'requester':requester})
 
 @job_record
-def end (job_id,
-         user, group, jobname, queue, cwd, exe, args, mode,
+def end (job_id, user, group, jobname, queue, cwd, exe, args, mode,
          ctime, qtime, etime, start, exec_host,
          resource_list, session, end, exit_status, resources_used,
          account=None, resvname=None, resv_id=None, alt_id=None,
@@ -212,16 +211,16 @@ def remove (reservation_id, requester):
     return entry("k", reservation_id, {'requester':requester})
 
 @job_record
-def queue (job_id, queue_):
+def queue (job_id, queue):
 
     """Job entered a queue.
 
     Arguments:
     job_id -- id of the job that entered the queue
-    queue_ -- the queue into which the job was placed
+    queue -- the queue into which the job was placed
     """
 
-    return entry("Q", job_id, {'queue':queue_})
+    return entry("Q", job_id, {'queue':queue})
 
 @job_record
 def rerun (job_id):
@@ -229,12 +228,8 @@ def rerun (job_id):
     return entry("R", job_id)
 
 @job_record
-def start (job_id,
-           user, group, jobname, queue, cwd, exe, args, mode,
-           ctime, qtime, etime, start, exec_host,
-           resource_list, session,
-           account=None, resvname=None, resv_id=None, alt_id=None,
-           accounting_id=None):
+def start (job_id, user, group, jobname, queue, cwd, exe, args, mode, ctime, qtime, etime, start, exec_host, resource_list, session,
+        account=None, resvname=None, resv_id=None, alt_id=None, accounting_id=None):
 
     """Job started (terminated execution).
 
@@ -264,11 +259,9 @@ def start (job_id,
     accounting_id -- CSA JID, job ID
     """
 
-    message = {'user':user, 'group':group, 'jobname':jobname, 'queue':queue,
-        'cwd':cwd, 'exe':exe, 'args':args, 'mode':mode,
-        'ctime':ctime, 'qtime':qtime, 'etime':etime, 'start':start,
-        'exec_host':exec_host, 'Resource_List':resource_list,
-        'session':session}
+    message = {'user':user, 'group':group, 'jobname':jobname, 'queue':queue, 'cwd':cwd, 'exe':exe, 'args':args, 'mode':mode,
+            'ctime':ctime, 'qtime':qtime, 'etime':etime, 'start':start, 'exec_host':exec_host, 'Resource_List':resource_list,
+            'session':session}
     if account is not None:
         message['account'] = account
     if resvname is not None:
@@ -325,7 +318,7 @@ class DatetimeFileHandler (BaseRotatingHandler):
     def __init__ (self, file_pattern, encoding=None):
         self.file_pattern = file_pattern
         BaseRotatingHandler.__init__(self, self.get_baseFilename(),
-            "a", encoding)
+                "a", encoding)
 
     def get_baseFilename (self):
         return os.path.abspath(datetime.now().strftime(self.file_pattern))
@@ -368,14 +361,15 @@ def entry_ (datetime_, record_type, id_string, message):
     message -- dictionary containing appropriate message data
     """
 
-    assert record_type in ("A", "B", "C", "D", "E", "F", "K", "k", "Q", "R",
-        "S", "T", "U", "Y"), "invalid record_type %r" % record_type
+    assert record_type in ("A", "B", "C", "D", "E", "F", "K", "k", "Q", "R", "S", "T", "U", "Y"), \
+            "invalid record_type %r" % record_type
     datetime_s = datetime_.strftime("%m/%d/%Y %H:%M:%S")
     message_text = serialize_message(message)
     return "%s;%s;%s;%s" % (datetime_s, record_type, id_string, message_text)
 
 
 def serialize_message (message):
+    '''convert message into PBS style keyval pairs.'''
     message = message.copy()
     for keyword, value in message.items():
         try:
@@ -391,9 +385,9 @@ def serialize_message (message):
             if ' ' in value or '"' in value or "," in value:
                 message[keyword] = '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
         else:
-            for f in (serialize_list, serialize_dt, serialize_td):
+            for func in (serialize_list, serialize_dt, serialize_td):
                 try:
-                    message[keyword] = f(message[keyword])
+                    message[keyword] = func(message[keyword])
                 except ValueError:
                     continue
                 else:
@@ -403,6 +397,7 @@ def serialize_message (message):
 
 
 def serialize_list (list_):
+    '''Convert list into PBS-style ',' delimited list'''
     try:
         values = []
         for value in list_:
@@ -415,6 +410,7 @@ def serialize_list (list_):
 
 
 def serialize_dt (datetime_):
+    '''datetime to seconds from epoch with microseconds'''
     try:
         return (mktime(datetime_.timetuple()) +
             (1.0 * datetime_.microsecond / 1000000))
@@ -423,6 +419,7 @@ def serialize_dt (datetime_):
 
 
 def serialize_td (timedelta_):
+    '''Convert a timedelta to seconds.'''
     try:
         return ((1.0 * timedelta_.days * 24 * 60 * 60) + timedelta_.seconds
             + (timedelta_.microseconds / 1000000))
@@ -430,69 +427,3 @@ def serialize_td (timedelta_):
         raise ValueError(ex)
 
 
-def demo ():
-    from datetime import timedelta
-    import logging
-
-    class FakeDatetime (object):
-
-        datetime = datetime
-
-        def __init__ (self, now):
-            self.start = self.datetime.now()
-            self.epoch = now
-
-        def now (self):
-            return self.epoch + (self.datetime.now() - self.start)
-
-    global datetime
-    datetime_ = datetime
-    datetime = FakeDatetime(datetime_(2000, 1, 1))
-
-    logger = logging.getLogger("accounting")
-    logger.setLevel(logging.INFO)
-    logger.addHandler(logging.StreamHandler())
-    logger.addHandler(DatetimeFileHandler("%Y%m%d"))
-
-    logger.info(abort(1))
-
-    logger.info(begin(1, owner="janderso", queue="default",
-        ctime=datetime.now(), start=datetime.now(),
-        end=datetime.now()+timedelta(hours=1),
-        duration=timedelta(hours=1), exec_host="ANL-R00-M0-512",
-        authorized_users=["janderso", "acherry"],
-        resource_list={'nodes':512}))
-
-    logger.info(checkpoint(1))
-
-    logger.info(delete(1, "janderso@login1.surveyor.alcf.anl.gov"))
-
-    logger.info(end(1, "janderso", "users", "foojob", "default",
-        datetime.now(), datetime.now(), datetime.now(), datetime.now(),
-        "ANL-R00-M0-512", {'nodes':512}, 123,
-        datetime.now()+timedelta(hours=1), 0,
-        {'nodes':512, 'time':timedelta(hours=1)}, account="myproject"))
-
-    logger.info(finish(1))
-
-    datetime = FakeDatetime(datetime_(2000, 1, 2))
-
-    logger.info(system_remove(1, "root@sn1"))
-
-    logger.info(remove(1, "janderso@login1"))
-
-    logger.info(queue(1, "default"))
-
-    logger.info(rerun(1))
-
-    logger.info(start(1, "janderso", "users", "foojob", "default",
-        datetime.now(), datetime.now(), datetime.now(), datetime.now(),
-        "ANL-R00-M0-512", {'nodes':512}, 123))
-
-    logger.info(unconfirmed(1, "janderso@alcf.anl.gov"))
-
-    logger.info(confirmed(1, "janderso@alcf.anl.gov"))
-
-
-if __name__ == "__main__":
-    demo()

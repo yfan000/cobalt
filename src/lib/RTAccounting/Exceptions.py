@@ -2,7 +2,7 @@
 
 """
 
-class ConnectionError(Exception):
+class ConnectionFailure(Exception):
     '''Unable to reach backing store'''
     pass
 
