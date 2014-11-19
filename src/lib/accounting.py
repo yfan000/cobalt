@@ -10,6 +10,7 @@ from time import mktime
 from logging.handlers import BaseRotatingHandler
 import codecs
 import os
+from Cobalt.Util import get_config_option
 from Cobalt.PathImporter import import_from_config
 
 
@@ -23,12 +24,16 @@ import inspect
 from functools import wraps
 
 
+RESOURCE_NAME = get_config_option('system', 'resource_name', 'default')
+
 #decorators for job/res information intercepts.
 def _gen_arg_dict(func, *args, **kwargs):
     '''generate the update dictionary from incoming data to accounting functions'''
     update_dict = dict(zip(inspect.getargspec(func).args, args))
     for key, val in kwargs.items():
         update_dict[key] = val
+    #make sure all messages are tagged with appropriate resource
+    update_dict['resource'] = RESOURCE_NAME
     return update_dict
 
 def job_record(func):
@@ -56,13 +61,16 @@ __all__ = ["abort", "begin", "checkpoint", "checkpoint_restart", "delete", "end"
 
 #messages to send
 @job_record
-def abort (job_id):
+def abort (job_id, user, resource_list, account=None, resource=RESOURCE_NAME):
     """Job was aborted by the server."""
-    return entry("A", job_id)
+    message = {'resource':resource, 'Resource_List':resource_list, 'user': user}
+    if account is not None:
+        message['account'] = account
+    return entry("A", job_id, message)
 
 @reservation_record
 def begin (id_string, owner, queue, ctime, start, end, duration, exec_host, authorized_users, resource_list, name=None,
-        account=None, authorized_groups=None, authorized_hosts=None):
+        account=None, authorized_groups=None, authorized_hosts=None, resource=RESOURCE_NAME):
 
     """Beginning of reservation period.
 
@@ -86,7 +94,7 @@ def begin (id_string, owner, queue, ctime, start, end, duration, exec_host, auth
     """
 
     message = {'owner':owner, 'queue':queue, 'ctime':ctime, 'start':start, 'end':end, 'duration':duration, 'exec_host':exec_host,
-        'authorized_users':authorized_users, 'Resource_List':resource_list}
+            'authorized_users':authorized_users, 'Resource_List':resource_list, 'resource':resource}
     if name is not None:
         message['name'] = name
     if account is not None:
@@ -98,17 +106,17 @@ def begin (id_string, owner, queue, ctime, start, end, duration, exec_host, auth
     return entry("B", id_string, message)
 
 @job_record
-def checkpoint (job_id):
+def checkpoint (job_id, resource=RESOURCE_NAME):
     """Job was checkpointed and held."""
-    return entry("C", job_id)
+    return entry("C", job_id, {'resource':resource})
 
 @job_record
-def checkpoint_restart (job_id):
+def checkpoint_restart (job_id, resource=RESOURCE_NAME):
     """Job was restarted from a checkpoint"""
-    return entry("T", job_id)
+    return entry("T", job_id, {'resource':resource})
 
 @job_record
-def delete (job_id, requester):
+def delete (job_id, requester, user, resource_list, account=None, resource=RESOURCE_NAME):
 
     """Job was deleted by request.
 
@@ -117,14 +125,15 @@ def delete (job_id, requester):
     requester -- who deleted the job (user@host)
     """
 
-    return entry("D", job_id, {'requester':requester})
+    message = {'requester':requester, 'resource':resource, 'Resource_List':resource_list, 'user': user}
+    if account is not None:
+        message['account'] = account
+    return entry("D", job_id, message)
 
 @job_record
-def end (job_id, user, group, jobname, queue, cwd, exe, args, mode,
-         ctime, qtime, etime, start, exec_host,
-         resource_list, session, end, exit_status, resources_used,
-         account=None, resvname=None, resv_id=None, alt_id=None,
-         accounting_id=None, total_etime=None, priority_core_hours=None):
+def end (job_id, user, group, jobname, queue, cwd, exe, args, mode, ctime, qtime, etime, start, exec_host, resource_list, session,
+        end, exit_status, resources_used, account=None, resvname=None, resv_id=None, alt_id=None, accounting_id=None,
+        total_etime=None, priority_core_hours=None, resource=RESOURCE_NAME):
 
     """Job ended (terminated execution).
 
@@ -162,7 +171,7 @@ def end (job_id, user, group, jobname, queue, cwd, exe, args, mode,
         'ctime':ctime, 'qtime':qtime, 'etime':etime, 'start':start,
         'exec_host':exec_host, 'Resource_List':resource_list,
         'session':session, 'end':end, 'Exit_status':exit_status,
-        'resources_used':resources_used}
+        'resources_used':resources_used, 'resource':resource}
     if account is not None:
         message['account'] = account
     if resvname is not None:
@@ -182,12 +191,12 @@ def end (job_id, user, group, jobname, queue, cwd, exe, args, mode,
     return entry("E", job_id, message)
 
 @reservation_record
-def finish (reservation_id):
+def finish (reservation_id, resource=RESOURCE_NAME):
     """Resource reservation period finished."""
-    return entry("F", reservation_id)
+    return entry("F", reservation_id, resource)
 
 @reservation_record
-def system_remove (reservation_id, requester):
+def system_remove (reservation_id, requester, resource=RESOURCE_NAME):
 
     """Scheduler or server requested removal of the reservation.
 
@@ -199,7 +208,7 @@ def system_remove (reservation_id, requester):
     return entry("K", reservation_id, {'requester':requester})
 
 @reservation_record
-def remove (reservation_id, requester):
+def remove (reservation_id, requester, resource=RESOURCE_NAME):
 
     """Resource reservation terminated by ordinary client.
 
@@ -211,25 +220,32 @@ def remove (reservation_id, requester):
     return entry("k", reservation_id, {'requester':requester})
 
 @job_record
-def queue (job_id, queue):
+def queue (job_id, queue, user, resource_list, account=None, resource=RESOURCE_NAME):
 
     """Job entered a queue.
 
     Arguments:
     job_id -- id of the job that entered the queue
     queue -- the queue into which the job was placed
-    """
+    user -- the user name under which the job will be executed
+    resource_list -- a dictionary of specified resource limits
+    account -- if not None, the account the job will be charged to (default: None)
+    resource -- the resource that this job will run on (specified in the cobalt.conf file, default: default)
 
-    return entry("Q", job_id, {'queue':queue})
+    """
+    message = {'queue':queue, 'resource':resource, 'Resource_List':resource_list, 'user': user}
+    if account is not None:
+        message['account'] = account
+    return entry("Q", job_id, message)
 
 @job_record
-def rerun (job_id):
+def rerun (job_id, resource=RESOURCE_NAME):
     """Job was rerun."""
-    return entry("R", job_id)
+    return entry("R", job_id, {'resource':resource})
 
 @job_record
 def start (job_id, user, group, jobname, queue, cwd, exe, args, mode, ctime, qtime, etime, start, exec_host, resource_list, session,
-        account=None, resvname=None, resv_id=None, alt_id=None, accounting_id=None):
+        account=None, resvname=None, resv_id=None, alt_id=None, accounting_id=None, resource=RESOURCE_NAME):
 
     """Job started (terminated execution).
 
@@ -261,7 +277,7 @@ def start (job_id, user, group, jobname, queue, cwd, exe, args, mode, ctime, qti
 
     message = {'user':user, 'group':group, 'jobname':jobname, 'queue':queue, 'cwd':cwd, 'exe':exe, 'args':args, 'mode':mode,
             'ctime':ctime, 'qtime':qtime, 'etime':etime, 'start':start, 'exec_host':exec_host, 'Resource_List':resource_list,
-            'session':session}
+            'session':session, 'resource':resource}
     if account is not None:
         message['account'] = account
     if resvname is not None:
@@ -273,7 +289,7 @@ def start (job_id, user, group, jobname, queue, cwd, exe, args, mode, ctime, qti
     return entry("S", job_id, message)
 
 @reservation_record
-def unconfirmed (reservation_id, requester):
+def unconfirmed (reservation_id, requester, resource=RESOURCE_NAME):
 
     """Created unconfirmed resources reservation.
 
@@ -285,7 +301,7 @@ def unconfirmed (reservation_id, requester):
     return entry("U", reservation_id, {'requester':requester})
 
 @reservation_record
-def confirmed (reservation_id, requester):
+def confirmed (reservation_id, requester, resource=RESOURCE_NAME):
 
     """Created unconfirmed resources reservation.
 
@@ -347,10 +363,10 @@ def entry (record_type, id_string, message=None):
 
     if message is None:
         message = {}
-    return entry_ (datetime.now(), record_type, id_string, message)
+    return _entry(datetime.now(), record_type, id_string, message)
 
 
-def entry_ (datetime_, record_type, id_string, message):
+def _entry (datetime_, record_type, id_string, message):
 
     """Generate an entry in a PBS accounting log.
 

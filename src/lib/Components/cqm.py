@@ -160,8 +160,7 @@ prediction_scheme = get_histm_config("prediction_scheme", "combined").lower()  #
 
 accounting_logdir = os.path.expandvars(get_cqm_config("log_dir", Cobalt.DEFAULT_LOG_DIRECTORY))
 accounting_logger = logging.getLogger("cqm.accounting")
-accounting_logger.addHandler(
-    accounting.DatetimeFileHandler(os.path.join(accounting_logdir, "%Y%m%d")))
+accounting_logger.addHandler( accounting.DatetimeFileHandler(os.path.join(accounting_logdir, "%Y%m%d")))
 
 
 dbwriter = Cobalt.Logging.dbwriter(logging)
@@ -1005,7 +1004,8 @@ class Job (StateMachine):
         if self.__max_job_timer.has_expired:
             # if the job execution time has exceeded the wallclock time, then inform the task that it must terminate
             self._sm_log_info("maximum execution time exceeded; initiating job termination", cobalt_log = True)
-            accounting_logger.info(accounting.abort(self.jobid))
+            accounting_logger.info(accounting.abort(self.jobid, self.user, {'ncpus':self.procs, 'nodect':self.nodes,
+                'walltime':str_elapsed_time(self.walltime * 60)}))
             return Signal_Info(Signal_Info.Reason.time_limit, Signal_Map.terminate)
         else:
             return None
@@ -2392,7 +2392,8 @@ class Job (StateMachine):
         if self.__max_job_timer.has_expired:
             # if the job execution time has exceeded the wallclock time, then proceed to cleanup and remove the job
             self._sm_log_info("maximum execution time exceeded; initiating job cleanup and removal", cobalt_log = True)
-            accounting_logger.info(accounting.abort(self.jobid))
+            accounting_logger.info(accounting.abort(self.jobid, self.user, {'ncpus':self.procs, 'nodect':self.nodes,
+                'walltime':str_elapsed_time(self.walltime * 60)}))
             self._sm_start_job_epilogue_scripts()
             return
 
@@ -2734,9 +2735,15 @@ class Job (StateMachine):
         return self.__queue
 
     def __set_queue(self, queue):
-        logger.info('Q;%s;%s;%s' % (self.jobid, self.user, queue))
+        '''Add a job to a given queue and log the change.
+
+        '''
+        queue_info_str = accounting.queue(self.jobid, queue, self.user, {'ncpus':self.procs, 'nodect':self.nodes,
+            'walltime':str_elapsed_time(self.walltime * 60)}, self.project)
+        stripped_info = ';'.join(queue_info_str.split(';')[1:])
+        logger.info(stripped_info) #'Q;%s;%s;%s' % (self.jobid, self.user, queue))
         self.acctlog.LogMessage('Q;%s;%s;%s' % (self.jobid, self.user, queue))
-        accounting_logger.info(accounting.queue(self.jobid, queue))
+        accounting_logger.info(queue_info_str)
         self.__timers['current_queue'] = Timer()
         self.__timers['current_queue'].start()
         self.__queue = queue
@@ -3071,9 +3078,12 @@ class Job (StateMachine):
             user = self.user
 
         # write job delete information to CQM and accounting logs
-        accounting_logger.info(accounting.delete(self.jobid, user))
-        logger.info('D;%s;%s' % (self.jobid, self.user))
-        self.acctlog.LogMessage('D;%s;%s' % (self.jobid, self.user))
+        delete_msg = accounting.delete(self.jobid, user, self.user, {'ncpus':self.procs, 'nodect':self.nodes,
+                'walltime':str_elapsed_time(self.walltime * 60)})
+        stripped_msg = ";".join(delete_msg.split(';')[1:])
+        accounting_logger.info(delete_msg)
+        logger.info(stripped_msg) #'D;%s;%s' % (self.jobid, self.user))
+        self.acctlog.LogMessage(stripped_msg) #'D;%s;%s' % (self.jobid, self.user))
 
         if not force:
             try:
@@ -3449,7 +3459,7 @@ class QueueDict(DataDict):
         failed = False
         for spec in specs:
             if spec['queue'] not in queue_names:
-                logger.error("trying to add job to non-existant queue %s" % spec['queue'])
+                logger.error("trying to add job to non-existent queue %s" % spec['queue'])
                 failed = True
             if not self.can_queue(spec)[0]:
                 logger.error("job %r cannot be added to queue" % spec)
@@ -3752,6 +3762,7 @@ class QueueManager(Component):
 
         failed = False
         for spec in specs:
+            failed, failure_msg = self._verify_job_spec(spec, False)
             if spec['queue'] in self.Queues:
                 if 'walltime' in spec:
                     if float(spec['walltime']) <= 0 and 'maxtime' not in self.Queues[spec['queue']].restrictions:
@@ -3768,7 +3779,7 @@ class QueueManager(Component):
                     if spec.has_key('walltime'):
                         spec['walltime_p'] = spec['walltime']
             else:
-                failure_msg = "trying to add job to non-existant queue '%s'" % spec['queue']
+                failure_msg = "trying to add job to non-existent queue '%s'" % spec['queue']
                 logger.error(failure_msg)
                 failed = True
         if failed:
@@ -3782,7 +3793,7 @@ class QueueManager(Component):
         return self.Queues.get_jobs(specs)
     get_jobs = exposed(query(get_jobs))
 
-    def set_jobs(self, specs, updates, user_name=None):
+    def set_jobs(self, specs, updates, user_name=None, advisory=False):
         joblist = self.Queues.get_jobs(specs)
 
         logger.info("%s calling set_jobs on %s with updates %s", user_name, specs, updates)
@@ -3797,7 +3808,7 @@ class QueueManager(Component):
             for job in joblist:
                 if job.is_active or job.has_completed:
                     raise QueueError, "job %d is running; it cannot be moved" % job.jobid
-
+        not_modified = []
         for job in joblist:
             old_q_name = job.queue
             test = job.to_rx()
@@ -3840,6 +3851,17 @@ class QueueManager(Component):
                 only_hold = True
 
             elif self.Queues[test["queue"]].can_queue(test):
+                #check to see if updated job would be allowed by accounting system
+                failed, failure_msg =  self._verify_job_spec(updates, advisory)
+                if failed and not advisory:
+                    msg = "Unable to modify job %s.  Reason: %s" % (job.jobid, failure_msg)
+                    logger.info(msg)
+                    not_modified.append(job)
+                    continue #go onto other jobs.  Do not modify this one.
+                elif failed:
+                    msg = "Accounting system reports issue for job %s.  Reason: %s" % (job.jobid, failure_msg)
+                    logger.info(msg)
+
                 job.update(updates)
                 if updates.has_key("all_dependencies"):
                     if job.all_dependencies:
@@ -3857,6 +3879,9 @@ class QueueManager(Component):
                     new_q.update_max_running()
                 if not only_hold:
                     dbwriter.log_to_db(user_name, "modifying", "job_data", JobDataMsg(job))
+        #return only the jobs modified.
+        for job in not_modified:
+            joblist.remove(job)
 
         return joblist
     set_jobs = exposed(query(set_jobs))
@@ -4005,7 +4030,24 @@ class QueueManager(Component):
         return self.cqp.q_get(data)
     get_history = exposed(get_history)
 
+    def _verify_job_spec(self, spec, advisory):
+        '''Given a job spec (from qsub, qalter or cqadm, typically.
+        return a tuple of success or failure of verification and a string indicating the reason why.
 
+        '''
+        return False, "DO NOTHING"
+        failed = False
+        failure_msg = "Job %s accounting validation successful."
+        spec['resource'] = RESOURCE_NAME
+        spec['timestamp'] = int(time.time())
+        verification_response = RealTimeAccounting.verify_job(spec)
+        #self.logger.debug('Data sent %s', spec)
+        #self.logger.debug('Verification response: %s', verification_response)
+        if verification_response['status'] == 'REJECT':
+            failure_msg = "Job %s failed to validate.  Reason: %s" % verification_response['reason']
+            self.logger.info(failure_msg)
+            failed = True
+        return failed, failure_msg
 
     def define_user_utility_functions(self, user_name=None):
         if user_name:
@@ -4126,12 +4168,12 @@ class QueueManager(Component):
                     for item in all_jobs]
         finally:
             all_jobs = dict(zip([job.jobid for job in all_jobs], all_jobs))
-            self.logger.debug('all jobs: %s', all_jobs)
-            self.logger.debug('verified jobs: %s',verified_jobs)
+            #self.logger.debug('all jobs: %s', all_jobs)
+            #self.logger.debug('verified jobs: %s',verified_jobs)
 
         for job in verified_jobs:
-            self.logger.debug('jobid %s, status %s, reason %s returned by logging system',
-                    job['jobid'], job['status'], job['reason'])
+            #self.logger.debug('jobid %s, status %s, reason %s returned by logging system',
+            #        job['jobid'], job['status'], job['reason'])
             if job['status'] == 'OK':
                 if all_jobs[job['jobid']].accounting_hold:
                     self.logger.info('Job %s released from accounting hold.  Reason: %s', job['jobid'], job['reason'])

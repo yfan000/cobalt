@@ -194,7 +194,7 @@ def setjobs(jobs, parser, spec, user):
         #for job in jobs:
             #job.update({'accounting_hold': not parser.options.accounting_hold})
 
-    return client_utils.component_call(QUEMGR, False, 'set_jobs', (jobs, spec, user))
+    return client_utils.component_call(QUEMGR, False, 'set_jobs', (jobs, spec, user, True))
 
 def process_cqadm_options(jobs, parser, spec, user):
     """
