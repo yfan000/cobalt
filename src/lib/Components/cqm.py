@@ -93,7 +93,7 @@ from Cobalt.StateMachine import StateMachine
 from Cobalt.Components.base import Component, exposed, automatic, query
 from Cobalt.Proxy import ComponentProxy
 from Cobalt.Exceptions import (QueueError, ComponentLookupError, DataStateError, StateMachineIllegalEventError,
-    JobProcessingError, JobRunError, JobPreemptionError, JobDeleteError, ResourceReservationFailure)
+    JobProcessingError, JobRunError, JobPreemptionError, JobDeleteError, ResourceReservationFailure, JobValidationError)
 from Cobalt import accounting
 from Cobalt.Util import get_config_option, init_cobalt_config
 from Cobalt.PathImporter import import_from_config
@@ -1279,7 +1279,6 @@ class Job (StateMachine):
     def _sm_common_hold__hold(self, args):
         '''place another hold on a job that is already in a hold state'''
         activity = False
-        logger.debug('INC HOLD TYPE=%s', args['type'])
         if args['type'] == 'admin':
             if not self.__admin_hold:
                 self.__admin_hold = True
@@ -3808,7 +3807,22 @@ class QueueManager(Component):
             for job in joblist:
                 if job.is_active or job.has_completed:
                     raise QueueError, "job %d is running; it cannot be moved" % job.jobid
-        not_modified = []
+        failure_info = []
+        for job in joblist:
+            #check to see if updated job would be allowed by accounting system
+            failed, failure_msg =  self._verify_job_spec(updates, advisory)
+            if failed and not advisory:
+                msg = "Unable to modify job %s.  Reason: %s" % (job.jobid, failure_msg)
+                logger.info(msg)
+                failure_info.append("%s: %s" % (job.jobid, failure_msg))
+                continue #go onto other jobs.  Do not modify this one.
+            elif failed:
+                msg = "Accounting system reports issue for job %s.  Reason: %s" % (job.jobid, failure_msg)
+                logger.info(msg)
+        if failure_info != []:
+            error_msg = "Unable to modify all specified jobs.  No modifications executed.\nReasons:\n%s" % "\n".join(failure_info)
+            raise JobValidationError(error_msg)
+
         for job in joblist:
             old_q_name = job.queue
             test = job.to_rx()
@@ -3851,17 +3865,6 @@ class QueueManager(Component):
                 only_hold = True
 
             elif self.Queues[test["queue"]].can_queue(test):
-                #check to see if updated job would be allowed by accounting system
-                failed, failure_msg =  self._verify_job_spec(updates, advisory)
-                if failed and not advisory:
-                    msg = "Unable to modify job %s.  Reason: %s" % (job.jobid, failure_msg)
-                    logger.info(msg)
-                    not_modified.append(job)
-                    continue #go onto other jobs.  Do not modify this one.
-                elif failed:
-                    msg = "Accounting system reports issue for job %s.  Reason: %s" % (job.jobid, failure_msg)
-                    logger.info(msg)
-
                 job.update(updates)
                 if updates.has_key("all_dependencies"):
                     if job.all_dependencies:
@@ -3880,9 +3883,6 @@ class QueueManager(Component):
                 if not only_hold:
                     dbwriter.log_to_db(user_name, "modifying", "job_data", JobDataMsg(job))
         #return only the jobs modified.
-        for job in not_modified:
-            joblist.remove(job)
-
         return joblist
     set_jobs = exposed(query(set_jobs))
 
@@ -4030,23 +4030,33 @@ class QueueManager(Component):
         return self.cqp.q_get(data)
     get_history = exposed(get_history)
 
-    def _verify_job_spec(self, spec, advisory):
+    def _verify_job_spec(self, spec, advisory=False):
         '''Given a job spec (from qsub, qalter or cqadm, typically.
         return a tuple of success or failure of verification and a string indicating the reason why.
 
         '''
-        return False, "DO NOTHING"
         failed = False
         failure_msg = "Job %s accounting validation successful."
         spec['resource'] = RESOURCE_NAME
         spec['timestamp'] = int(time.time())
-        verification_response = RealTimeAccounting.verify_job(spec)
-        #self.logger.debug('Data sent %s', spec)
-        #self.logger.debug('Verification response: %s', verification_response)
-        if verification_response['status'] == 'REJECT':
-            failure_msg = "Job %s failed to validate.  Reason: %s" % verification_response['reason']
-            self.logger.info(failure_msg)
+        try:
+            verification_response = RealTimeAccounting.verify_job([spec])
+        except RealTimeAccounting.BadMessage:
             failed = True
+            failure_msg = "RTA Bad Message recieved by Cobalt accounting interface.  Please contact your system administrator."
+            raise
+        except RealTimeAccounting.ConnectionFailure:
+            failed = True
+            failure_msg = "RTA Connection Failure recieved by Cobalt accounting interface.  "\
+                    "Please contact your system administrator."
+            raise
+        else:
+            #only sending one job, must get only one response.
+            if verification_response[0]['status'] == 'REJECT':
+                failure_msg = "Job failed to validate.  Reason: %s" % (verification_response[0]['reason'])
+                self.logger.info(failure_msg)
+                if not advisory:
+                    failed = True
         return failed, failure_msg
 
     def define_user_utility_functions(self, user_name=None):
@@ -4168,12 +4178,8 @@ class QueueManager(Component):
                     for item in all_jobs]
         finally:
             all_jobs = dict(zip([job.jobid for job in all_jobs], all_jobs))
-            #self.logger.debug('all jobs: %s', all_jobs)
-            #self.logger.debug('verified jobs: %s',verified_jobs)
 
         for job in verified_jobs:
-            #self.logger.debug('jobid %s, status %s, reason %s returned by logging system',
-            #        job['jobid'], job['status'], job['reason'])
             if job['status'] == 'OK':
                 if all_jobs[job['jobid']].accounting_hold:
                     self.logger.info('Job %s released from accounting hold.  Reason: %s', job['jobid'], job['reason'])
