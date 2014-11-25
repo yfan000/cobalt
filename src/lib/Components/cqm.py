@@ -108,6 +108,7 @@ init_cobalt_config()
 CLOB_SIZE = 4096
 SERVICE_NAME = 'cqm'
 RESOURCE_NAME = get_config_option('system', 'resource_name', 'default')
+REALTIME_INTERFACE_ERRORS_FATAL = get_config_option('accounting', 'exceptions_fatal', False)
 
 logger = logging.getLogger(__name__.split('.')[-1])
 
@@ -3761,7 +3762,22 @@ class QueueManager(Component):
 
         failed = False
         for spec in specs:
-            failed, failure_msg = self._verify_job_spec(spec, False)
+            try:
+                failed, failure_msg = self._verify_job_spec(spec, False)
+            except RealTimeAccounting.BadMessage:
+                self.logger.error('Bad message sent to realtime accounting system.')
+                if REALTIME_INTERFACE_ERRORS_FATAL:
+                    raise
+                else:
+                    failed = False
+                    failure_msg = 'Bad messge recieved by realtime accounting system.'
+            except RealTimeAccounting.ConnectionFailure:
+                self.logger.error('Failed to connect to realtime accounting system.')
+                if REALTIME_INTERFACE_ERRORS_FATAL:
+                    raise
+                else:
+                    failed = False
+                    failure_msg = 'Error Connecting to realtime accounting system.'
             if spec['queue'] in self.Queues:
                 if 'walltime' in spec:
                     if float(spec['walltime']) <= 0 and 'maxtime' not in self.Queues[spec['queue']].restrictions:
@@ -3810,7 +3826,20 @@ class QueueManager(Component):
         failure_info = []
         for job in joblist:
             #check to see if updated job would be allowed by accounting system
-            failed, failure_msg =  self._verify_job_spec(updates, advisory)
+            try:
+                failed, failure_msg =  self._verify_job_spec(updates, advisory)
+            except RealTimeAccounting.BadMessage:
+                failed = False
+                failure_msg = 'Bad message received by realtime accounting system.'
+                self.logger.error(failure_msg)
+                if REALTIME_INTERFACE_ERRORS_FATAL:
+                    raise
+            except RealTimeAccounting.ConnectionFailure:
+                failed = False
+                failure_msg = 'Error Connecting to realtime accounting system.'
+                self.logger.error(failure_msg)
+                if REALTIME_INTERFACE_ERRORS_FATAL:
+                    raise
             if failed and not advisory:
                 msg = "Unable to modify job %s.  Reason: %s" % (job.jobid, failure_msg)
                 logger.info(msg)
@@ -4036,7 +4065,16 @@ class QueueManager(Component):
 
         '''
         failed = False
-        failure_msg = "Job %s accounting validation successful."
+        failure_msg = "Candidate job accounting validation successful."
+        if 'jobid' in spec.keys():
+            failure_msg = "Job %s accounting validation successful." % spec['jobid']
+        #keep the job attribute space clean and don't accidentally add extra keys
+        old_resource = None
+        old_timestamp = None
+        if 'resource' in spec.keys():
+            old_resource = spec['resource']
+        if 'timestamp' in spec.keys():
+            old_timestamp = spec['timestamp']
         spec['resource'] = RESOURCE_NAME
         spec['timestamp'] = int(time.time())
         try:
@@ -4052,11 +4090,21 @@ class QueueManager(Component):
             raise
         else:
             #only sending one job, must get only one response.
-            if verification_response[0]['status'] == 'REJECT':
+            if verification_response[0]['status'] != 'ACCEPT':
                 failure_msg = "Job failed to validate.  Reason: %s" % (verification_response[0]['reason'])
                 self.logger.info(failure_msg)
                 if not advisory:
                     failed = True
+        finally:
+            #clean up our modifications to the job spec
+            if old_resource is not None:
+                spec['resource'] = old_resource
+            else:
+                del spec['resource']
+            if old_timestamp is not None:
+                spec['timestamp'] = old_timestamp
+            else:
+                del spec['timestamp']
         return failed, failure_msg
 
     def define_user_utility_functions(self, user_name=None):

@@ -55,8 +55,6 @@ from TestCobalt.Utilities.ThreadSupport import *
 from TestCobalt.Utilities.Time import timeout
 from TestCobalt.Utilities.disable import disabled
 
-import mock
-from mock import Mock, MagicMock
 
 # if logging is enabled, send all cqm and generic component logging to a file
 if ENABLE_LOGGING:
