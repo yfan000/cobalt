@@ -1,7 +1,8 @@
 """Handle generation of accounting log records, also known as the PBS logs.
 
-These follow the standard mesasges from the accounting logs in OpenPBS's documentation.
-This is based on the PBS Professional Reference Guide, chapter 9.
+These follow the standard messages from the accounting logs in OpenPBS's documentation.
+This conforms to the log format from the PBS Professional Reference Guide, chapter 9,
+with extensions.
 
 """
 
@@ -19,7 +20,6 @@ try:
 except ImportError:
     import Cobalt.RTAccounting.stub_interface as RealTimeAccounting
 
-#print RealTimeAccounting.fetch_job_status([{'jobid': 12345}])
 import inspect
 from functools import wraps
 
@@ -117,7 +117,6 @@ def checkpoint_restart (job_id, resource=RESOURCE_NAME):
 
 @job_record
 def delete (job_id, requester, user, resource_list, account=None, resource=RESOURCE_NAME):
-
     """Job was deleted by request.
 
     Arguments:
@@ -140,7 +139,7 @@ def end (job_id, user, group, jobname, queue, cwd, exe, args, mode, ctime, qtime
     Arguments:
     job_id -- identifier of the job that ended
     user -- the user name under which the job executed
-    group -- the group name under which the job executed
+    group -- the goup name under which the job executed
     jobname -- the name of the job
     queue -- the name of the queue in which the job executed
     cwd -- the current working directory used by the job
@@ -167,7 +166,7 @@ def end (job_id, user, group, jobname, queue, cwd, exe, args, mode, ctime, qtime
     """
 
     message = {'user':user, 'group':group, 'jobname':jobname, 'queue':queue,
-        'cwd':cwd, 'exe':exe, 'args':args, 'mode':mode,
+         'cwd':cwd, 'exe':exe, 'args':args, 'mode':mode,
         'ctime':ctime, 'qtime':qtime, 'etime':etime, 'start':start,
         'exec_host':exec_host, 'Resource_List':resource_list,
         'session':session, 'end':end, 'Exit_status':exit_status,
@@ -193,10 +192,10 @@ def end (job_id, user, group, jobname, queue, cwd, exe, args, mode, ctime, qtime
 @reservation_record
 def finish (reservation_id, resource=RESOURCE_NAME):
     """Resource reservation period finished."""
-    return entry("F", reservation_id, resource)
+    return entry("F", reservation_id, {'resource':resource})
 
 @reservation_record
-def system_remove (reservation_id, requester, resource=RESOURCE_NAME):
+def system_remove (reservation_id, requester, ctime, stime, etime, resource_list, account=None ,resource=RESOURCE_NAME):
 
     """Scheduler or server requested removal of the reservation.
 
@@ -204,8 +203,13 @@ def system_remove (reservation_id, requester, resource=RESOURCE_NAME):
     reservation_id -- id of the reservation that was removed
     requester -- user@host to identify who deleted the resource reservation
     """
-
-    return entry("K", reservation_id, {'requester':requester})
+    #Note: for charging purposes, this is closest to the 'E' record.  This
+    #indicates the job data that should actually be charged.
+    msg = {'requester':requester, 'ctime':int(ctime), 'stime':int(stime), 'etime':int(etime),
+            'Resource_List':resource_list, 'resource':resource}
+    if account is not None:
+        msg['account'] = account
+    return entry("K", reservation_id, msg)
 
 @reservation_record
 def remove (reservation_id, requester, resource=RESOURCE_NAME):
@@ -217,7 +221,7 @@ def remove (reservation_id, requester, resource=RESOURCE_NAME):
     requester -- user@host to identify who deleted the resource reservation
     """
 
-    return entry("k", reservation_id, {'requester':requester})
+    return entry("k", reservation_id, {'requester':requester, 'resource':resource})
 
 @job_record
 def queue (job_id, queue, user, resource_list, account=None, resource=RESOURCE_NAME):
@@ -298,10 +302,10 @@ def unconfirmed (reservation_id, requester, resource=RESOURCE_NAME):
     requester -- user@host to identify who requested the resources reservation
     """
 
-    return entry("U", reservation_id, {'requester':requester})
+    return entry("U", reservation_id, {'requester':requester, 'resource':resource})
 
 @reservation_record
-def confirmed (reservation_id, requester, resource=RESOURCE_NAME):
+def confirmed (reservation_id, requester, start, duration, resource_list, account=None, resource=RESOURCE_NAME):
 
     """Created unconfirmed resources reservation.
 
@@ -309,8 +313,13 @@ def confirmed (reservation_id, requester, resource=RESOURCE_NAME):
     reservation_id -- id of the unconfirmed reservation
     requester -- user@host to identify who requested the resources reservation
     """
+    msg = {'requester':requester, 'start':int(start), 'duration':int(duration),
+            'end':int(start) + int(duration), 'Resource_List':resource_list,
+            'resource':resource}
+    if account is not None:
+        msg['account'] = account
 
-    return entry("Y", reservation_id, {'requester':requester})
+    return entry("Y", reservation_id, msg)
 
 
 class DatetimeFileHandler (BaseRotatingHandler):

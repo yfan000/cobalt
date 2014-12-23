@@ -5,7 +5,10 @@ This is a do-nothing stub useful for testing, or running against accounting syst
 
 """
 import logging
-import Cobalt.RTAccounting.Exceptions
+from Cobalt.RTAccounting.Exceptions import ConnectionFailure, BadMessage
+
+__all__ = ['ConnectionFailure', 'BadMessage', 'user_default_project', 'project_user_list', 'fetch_job_status', 'verify_job',
+        'verify_reservation', 'update_job', 'update_reservation']
 
 STOCK_REASON = "using the stub implementation."
 
@@ -27,28 +30,46 @@ def fetch_job_status(job_data):
                          'status': "OK",
                          'reason': STOCK_REASON,
                          })
+
     return ret_list
 
 def verify_job(job_data):
-    '''return that all jobs are accepted'''
+    '''returns all jobs accepted.  Can take multiple jobs in a single call.'''
     ret_list = []
     for job in job_data:
-        ret_list.append({'jobid': job['jobid'],
-                         'status': "ACCEPT",
-                         'reason': STOCK_REASON,
-                        })
+        if 'jobid' in job.keys():
+            if job['jobid'] in [254, 256, 257]:
+                ret_list.append({'jobid': job['jobid'],
+                                 'status': "REJECT",
+                                 'reason': STOCK_REASON,
+                            })
+            else:
+                ret_list.append({'jobid': job['jobid'],
+                                 'status': "ACCEPT",
+                                 'reason': STOCK_REASON,
+                                })
+        else:
+            ret_list.append({'jobid': None,
+                             'status': "ACCEPT",
+                             'reason': STOCK_REASON,
+                            })
     return ret_list
 
 def update_job(job_data, timestamp=None):
     '''do nothing stub interface for job_updates'''
     _logger.debug("JOB UPDATED with %s %s", job_data, timestamp)
-    pass
 
 def verify_reservation(reservation_data):
     '''STUB: all reservations should be accepted.'''
     ret_list = []
+    #optional_fields = ['reservation_id', 'cycle_id', 'active_id'] #will not exist for proposed reservations
+    expected_fields = ['name', 'resource_list', 'duration', 'start']
+    _logger.debug("%s", reservation_data)
     for res in reservation_data:
-        ret_list.append({'jobid': res['resid'],
+        for field in expected_fields:
+            if field not in res.keys():
+                raise BadMessage("Could not find %s field." % field)
+        ret_list.append({'name': res['name'],
                          'status': "ACCEPT",
                          'reason': STOCK_REASON,
                         })

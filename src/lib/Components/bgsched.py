@@ -9,16 +9,22 @@ import time
 import ConfigParser
 import xmlrpclib
 import math
+import os
 
 import Cobalt.Logging, Cobalt.Util
 from Cobalt.Data import Data, DataDict, ForeignData, ForeignDataDict, IncrID
 from Cobalt.Components.base import Component, exposed, automatic, query, locking
 from Cobalt.Proxy import ComponentProxy
-from Cobalt.Exceptions import ReservationError, DataCreationError, ComponentLookupError
-
+from Cobalt.Exceptions import ReservationError, ComponentLookupError
+import Cobalt.accounting as accounting
 import Cobalt.SchedulerPolicies
 import traceback
-
+from Cobalt.PathImporter import import_from_config
+#site-local specified imports.
+try:
+    RealTimeAccounting = import_from_config('RTAccounting', 'path', 'module_name')
+except ImportError:
+    import Cobalt.RTAccounting.stub_interface as RealTimeAccounting
 
 logger = logging.getLogger("Cobalt.Components.scheduler")
 config = ConfigParser.ConfigParser()
@@ -33,7 +39,26 @@ DEFAULT_RESERVATION_POLICY = "default"
 bgsched_id_gen = None
 bgsched_cycle_id_gen = None
 
+DEFAULT_ACCOUNTING_LOG_PREFIX = 'reservation'
+_accounting_logger = logging.getLogger("bgsched.accounting")
+
+def _init_accounting_log():
+    '''Initialize PBS-style accounting log for this module'''
+    reservation_filename = "%s-%%Y%%m%%d" % get_bgsched_config("accounting_log_prefix", DEFAULT_ACCOUNTING_LOG_PREFIX)
+    accounting_logdir = os.path.expandvars(get_bgsched_config("log_dir", Cobalt.DEFAULT_LOG_DIRECTORY))
+    _accounting_logger.addHandler( accounting.DatetimeFileHandler(os.path.join(accounting_logdir, reservation_filename)))
+
+def _write_to_accounting_log(msg):
+    '''Send to PBS-style accounting log for this module to accounting log and syslog'''
+    stripped_info = ';'.join(msg.split(';')[1:])
+    logger.info(stripped_info)
+    _accounting_logger.info(msg)
+
 def get_bgsched_config(option, default):
+    '''fetch configuration variables for bgsched
+
+    '''
+    #Note: should be replaced by get config functions from Cobalt.util
     try:
         value = config.get('bgsched', option)
     except ConfigParser.NoOptionError:
@@ -41,6 +66,10 @@ def get_bgsched_config(option, default):
     return value
 
 def get_histm_config(option, default):
+    '''fetch configuration variables for history manager (part of walltime prediction)
+
+    '''
+    #Note: should be replaced by get config functions from Cobalt.util
     try:
         value = config.get('histm', option)
     except ConfigParser.NoSectionError:
@@ -67,28 +96,29 @@ if use_db_logging.lower() in ['true', '1', 'yes', 'on']:
         dbwriter.overflow_filename = overflow_filename
         dbwriter.max_queued = max_queued
 
-
-
 class Reservation (Data):
 #pylint: disable=R0902
-    """Cobalt scheduler reservation."""
+    '''Cobalt scheduler reservation.
+
+    '''
+    #Notes:
+    #ctime -- the time of the creation of the active res_id.  On a cyclic reservation,
+    #         this will be updated when cycling is complete.
 
     fields = Data.fields + [
         "tag", "name", "start", "duration", "cycle", "users", "partitions",
-        "active", "queue", "res_id", "cycle_id", 'project', "block_passthrough"
+        "active", "queue", "res_id", "cycle_id", 'project', "block_passthrough",
+        "resource_list", "active_id"
     ]
-
     required = ["name", "start", "duration"]
 
-    global bgsched_id_gen
-    global bgsched_cycle_id_gen
-
     def __init__ (self, spec):
+        '''initialize a reservation according to a spec dictionary'''
         Data.__init__(self, spec)
         self.tag = spec.get("tag", "reservation")
         self.cycle = spec.get("cycle")
         self.users = spec.get("users", "")
-        self.createdQueue = False
+        self.created_queue = False
         self.partitions = spec.get("partitions", "")
         self.name = spec['name']
         self.start = spec['start']
@@ -100,17 +130,24 @@ class Reservation (Data):
             self.cycle_id = spec.get("cycle_id", self.cycle_id_gen.get())
         else:
             self.cycle_id = None
+        self.active_id_gen = IncrID()
+        self.active_id_gen.idnum = int(spec.get("active_id", 1)) - 1
+        self.active_id = self.active_id_gen.get()
 
         self.running = False
         self.project = spec.get("project", None)
         self.block_passthrough = spec.get("block_passthrough", False)
-
-    def _get_active(self):
-        return self.is_active()
-
-    active = property(_get_active)
+        self.ctime = int(time.time())
+        self.stime = spec.get('stime', None)
+        self.resource_list = spec['resource_list']
 
     def update (self, spec):
+        '''Update reservations with changes based on a dictionary.  This
+        dictionary is generated from received XMLRPC. This provides provides
+        reservation-specific validation for data prior to insertion into the
+        actual data entry for the reservation.
+
+        '''
         if spec.has_key("users"):
             qm = ComponentProxy("queue-manager")
             try:
@@ -133,22 +170,24 @@ class Reservation (Data):
         #message.  There really isn't a corresponding field to update
         deferred = False
         if spec.has_key('defer'):
-            logger.info("Res %s/%s: Deferring cyclic reservation: %s",
-                        self.res_id, self.cycle_id, self.name) 
+            logger.info("Res %s/%s: Deferring cyclic reservation: %s", self.res_id, self.cycle_id, self.name)
             dbwriter.log_to_db(user_name, "deferred", "reservation", self)
             del spec['defer']
             deferred = True
 
         Data.update(self, spec)
 
+        _write_to_accounting_log(accounting.confirmed(self.res_id, user_name, self.start, self.duration,
+            self.resource_list, self.project))
         if not deferred or not self.running:
-            #we only want this if we aren't defering.  If we are, the cycle will
+            #we only want this if we aren't deferring.  If we are, the cycle will
             #take care of the new data object creation.
             dbwriter.log_to_db(user_name, "modifying", "reservation", self)
 
 
     def overlaps(self, start, duration):
         '''check job overlap with reservations'''
+        #TODO: see if this can be simplified a bit --PMR
         if start + duration < self.start:
             return False
 
@@ -157,10 +196,10 @@ class Reservation (Data):
 
         my_stop = self.start + self.duration
         if self.start <= start < my_stop:
-            # Job starts within reservation 
+            # Job starts within reservation
             return True
         elif self.start <= (start + duration) < my_stop:
-            # Job ends within reservation 
+            # Job ends within reservation
             return True
         elif start < self.start and (start + duration) >= my_stop:
             # Job starts before and ends after reservation
@@ -195,9 +234,9 @@ class Reservation (Data):
 
             # if the job is non zero then just use the walltime as is else give the max reservation time possible
             _walltime = float(job.walltime)
-            
+
             _walltime = _walltime if _walltime > 0 else (res_end - cur_time - 300)/60
-            logger.info('Walltime: %s' % str(_walltime))
+            logger.info('Walltime: %s', str(_walltime))
 
             job_end = cur_time + 60 * _walltime + SLOP_TIME
             if not self.cycle:
@@ -220,6 +259,27 @@ class Reservation (Data):
         else:
             return False
 
+    def __cycle_reservation(self, deferral_while_active=False):
+        '''Take actions to generate a new res_id, and log that a reservation
+        has cycled
+
+        '''
+        self.res_id = bgsched_id_gen.get()
+        self.ctime = int(time.time())
+        self.active_id_gen = IncrID()
+        self.active_id = self.active_id_gen.get()
+        logger.info("Res %s/%s: Cycling reservation: %s", self.res_id,
+                self.cycle_id, self.name)
+        _write_to_accounting_log(accounting.finish(self.res_id))
+        self.stime = None
+        if deferral_while_active:
+            #if we are deferring while active, don't increment the time.  That's already happened.
+            self.set_start_to_next_cycle()
+            self.running = False
+        _write_to_accounting_log(accounting.confirmed(self.res_id,
+            "Scheduler", self.start, self.duration, self.resource_list, self.project))
+        dbwriter.log_to_db(None, "cycling", "reservation", self)
+
 
     def is_active(self, stime=False):
         '''Determine if the reservation is active.  A reservation is active
@@ -231,6 +291,7 @@ class Reservation (Data):
             stime = time.time()
 
         if stime < self.start:
+            etime = int(time.time())
             if self.running:
                 self.running = False
                 if self.cycle:
@@ -238,16 +299,17 @@ class Reservation (Data):
                     #Time's already tweaked at this point.
                     logger.info("Res %s/%s: Active reservation %s deactivating: Deferred and cycling.",
                         self.res_id, self.cycle_id, self.name)
-                    dbwriter.log_to_db(None, "deactivating", "reservation", self)
+                    _write_to_accounting_log(accounting.system_remove(self.res_id, "Scheduler", self.ctime, self.stime,
+                        etime, self.resource_list, self.project))
+                    dbwriter.log_to_db(None, "deactivating", "reservation", self, etime)
                     dbwriter.log_to_db(None, "instance_end","reservation", self)
-                    self.res_id = bgsched_id_gen.get()
-                    logger.info("Res %s/%s: Cycling reservation: %s", 
-                             self.res_id, self.cycle_id, self.name) 
-                    dbwriter.log_to_db(None, "cycling", "reservation", self)
+                    self.__cycle_reservation(True)
                 else:
                     logger.info("Res %s/%s: Active reservation %s deactivating: start time in future.",
                         self.res_id, self.cycle_id, self.name)
-                    dbwriter.log_to_db(None, "deactivating", "reservation", self)
+                    _write_to_accounting_log(accounting.system_remove(self.res_id, "Scheduler", self.ctime, self.stime,
+                        etime, self.resource_list, self.project))
+                    dbwriter.log_to_db(None, "deactivating", "reservation", self, etime)
             return False
 
         if self.cycle:
@@ -258,45 +320,52 @@ class Reservation (Data):
         if now <= self.duration:
             if not self.running:
                 self.running = True
-                logger.info("Res %s/%s: Activating reservation: %s",
-                        self.res_id, self.cycle_id, self.name) 
+                self.stime = int(time.time())
+                logger.info("Res %s/%s: Activating reservation: %s", self.res_id, self.cycle_id, self.name)
+                user = None
+                if self.users is not None:
+                    user = self.users[0]
+                _write_to_accounting_log(accounting.begin(self.res_id, user, self.queue, self.ctime,
+                    int(self.start), int(self.start) + int(self.duration), int(self.duration),
+                    self.partitions, self.users, self.resource_list, name=self.name, account=self.project,
+                    authorized_groups=None, authorized_hosts=None))
                 dbwriter.log_to_db(None, "activating", "reservation", self)
             return True
         else:
             return False
+    active = property(is_active)
 
     def is_over(self):
         '''Determine if a reservation is over and initiate cleanup.
 
         '''
-
         stime = time.time()
+        etime = int(time.time())
         # reservations with a cycle time are never "over"
         if self.cycle:
             #but it does need a new res_id, cycle_id remains constant.
-            if((((stime - self.start) % self.cycle) > self.duration) 
+            if((((stime - self.start) % self.cycle) > self.duration)
                and self.running):
                 #do this before incrementing id.
                 logger.info("Res %s/%s: Deactivating reservation: %s: Reservation Cycling",
-                    self.res_id, self.cycle_id, self.name) 
-                dbwriter.log_to_db(None, "deactivating", "reservation", self)
-                dbwriter.log_to_db(None, "instance_end", "reservation", self)
-                self.set_start_to_next_cycle()
-                self.running = False
-                self.res_id = bgsched_id_gen.get()
-                logger.info("Res %s/%s: Cycling reservation: %s", 
-                             self.res_id, self.cycle_id, self.name) 
-                dbwriter.log_to_db(None, "cycling", "reservation", self)
+                    self.res_id, self.cycle_id, self.name)
+                _write_to_accounting_log(accounting.system_remove(self.res_id, "Scheduler", self.ctime, self.stime,
+                    etime, self.resource_list, self.project))
+                dbwriter.log_to_db(None, "deactivating", "reservation", self, etime)
+                dbwriter.log_to_db(None, "instance_end", "reservation", self, etime)
+                self.__cycle_reservation()
             return False
 
         if (self.start + self.duration) <= stime:
             if self.running == True:
                 #The active reservation is no longer considered active
-                #do this only once to prevent a potential double-deactivate 
+                #do this only once to prevent a potential double-deactivate
                 #depending on how/when this check is called.
-                logger.info("Res %s/%s: Deactivating reservation: %s", 
-                             self.res_id, self.cycle_id, self.name) 
-                dbwriter.log_to_db(None, "deactivating", "reservation", self)
+                logger.info("Res %s/%s: Deactivating reservation: %s",
+                             self.res_id, self.cycle_id, self.name)
+                _write_to_accounting_log(accounting.system_remove(self.res_id, "Scheduler", self.ctime, self.stime,
+                    etime, self.resource_list, self.project))
+                dbwriter.log_to_db(None, "deactivating", "reservation", self, etime)
             self.running = False
             return True
         else:
@@ -308,44 +377,40 @@ class Reservation (Data):
         current reservation start time + the cycle time interval.
 
         '''
-
-
         if self.cycle:
-
             new_start = self.start
             now = time.time()
             periods = int(math.floor((now - self.start) / float(self.cycle)))
-
-            #so here, we should always be coming out of a reservation.  The 
-            #only time we wouldn't be is if for some reason the scheduler was 
+            #so here, we should always be coming out of a reservation.  The
+            #only time we wouldn't be is if for some reason the scheduler was
             #disrupted.
             if now < self.start:
                 new_start += self.cycle
-            else: 
+            else:
                 #this is not going to start during a reservation, so we only
                 #have to go periods + 1.
                 new_start += (periods + 1) * self.cycle
-
             self.start = new_start
 
 
 class ReservationDict (DataDict):
     '''DataDict-style dictionary for reservation data.
-    Ensueres that there is a queue in the queue manager associated with a new
+    Ensures that there is a queue in the queue manager associated with a new
     reservation, by either associating with an extant queue, or creating a new
     one for this reservation's use.
 
-    Will also kill a created queue on reservation deactivation and cleanup.
+    Will also kill a created queue on reservation deactivation and cleanup,
+    though the queue will remain if it still has jobs in it.  These jobs will
+    not run, but may be moved to other queues/subject to another reservation.
 
     '''
     item_cls = Reservation
     key = "name"
 
-    global bgsched_id_gen
 
     def q_add (self, *args, **kwargs):
         '''Add a reservation to tracking.
-        Side Efffects:
+        Side Effects:
             -Add a queue to be tracked
             -If no cqm associated queue, create a reservation queue
             -set policies for new queue
@@ -363,6 +428,15 @@ class ReservationDict (DataDict):
         try:
             specs = args[0]
             for spec in specs:
+                logger.debug("SPECS %s", spec)
+                spec['resource_list'] = ComponentProxy("system").get_location_statistics(spec['partitions'].split(':'))
+                try:
+                    status = RealTimeAccounting.verify_reservation([spec])
+                    logger.debug("STATUS %s", status[0])
+                except RealTimeAccounting.BadMessage:
+                    logger.warning("Unable to verify reservation %s.  Bad message received by realtime interface.")
+                except RealTimeAccounting.ConnectionFailure:
+                    logger.warning("Unable to verify reservation %s.  Connection failure in communicating to realtime interface.")
                 if "res_id" not in spec or spec['res_id'] == '*':
                     spec['res_id'] = bgsched_id_gen.get()
             reservations = Cobalt.Data.DataDict.q_add(self, *args, **kwargs)
@@ -379,7 +453,7 @@ class ReservationDict (DataDict):
                     logger.error("unable to add reservation queue %s (%s)",
                                  reservation.queue, err)
                 else:
-                    reservation.createdQueue = True
+                    reservation.created_queue = True
                     logger.info("added reservation queue %s", reservation.queue)
             try:
                 # we can't set the users list using add_queues, so we want to
@@ -406,7 +480,7 @@ class ReservationDict (DataDict):
         qm = ComponentProxy('queue-manager')
         queues = [spec['name'] for spec in qm.get_queues([{'name':"*"}])]
         spec = [{'name': reservation.queue} for reservation in reservations \
-                if reservation.createdQueue and reservation.queue in queues \
+                if reservation.created_queue and reservation.queue in queues \
                 and not self.q_get([{'queue':reservation.queue}])]
         try:
             qm.set_queues(spec, {'state':"dead"}, "bgsched")
@@ -414,7 +488,7 @@ class ReservationDict (DataDict):
             logger.error("problem disabling reservation queue (%s)" % err)
 
         for reservation in reservations:
-            #This should be the last place we have handles to reservations, 
+            #This should be the last place we have handles to reservations,
             #after this they're heading to GC.
             if reservation.is_active():
                 #if we are active, then drop a deactivating message.
@@ -422,6 +496,7 @@ class ReservationDict (DataDict):
                         reservation)
                 if reservation.cycle:
                     dbwriter.log_to_db(None, "instance_end","reservation", self)
+            _write_to_accounting_log(accounting.finish(reservation.res_id))
             dbwriter.log_to_db(None, "terminated", "reservation", reservation)
         return reservations
 
@@ -434,7 +509,7 @@ class Job (ForeignData):
 
     fields = ForeignData.fields + [
         "nodes", "location", "jobid", "state", "index", "walltime", "queue",
-        "user", "submittime", "starttime", "project", 'is_runnable', 
+        "user", "submittime", "starttime", "project", 'is_runnable',
         'is_active', 'has_resources', "score", 'attrs', 'walltime_p',
         'geometry'
     ]
@@ -478,7 +553,7 @@ class JobDict(ForeignDataDict):
                   'score', 'attrs', 'walltime_p','geometry']
 
 class Queue(ForeignData):
-    """Cache of queue data for scheduling decisions and reservation 
+    """Cache of queue data for scheduling decisions and reservation
     association.
 
     """
@@ -518,6 +593,7 @@ class BGSched (Component):
     """The scheduler component interface and driver functions.
 
     """
+    #TODO: fix usage of global, probably not needed.
     implementation = "bgsched"
     name = "scheduler"
     logger = logging.getLogger("Cobalt.Components.scheduler")
@@ -541,6 +617,7 @@ class BGSched (Component):
 
     def __init__(self, *args, **kwargs):
         Component.__init__(self, *args, **kwargs)
+        _init_accounting_log()
         self.reservations = ReservationDict()
         self.queues = QueueDict()
         self.jobs = JobDict()
@@ -564,14 +641,15 @@ class BGSched (Component):
                 'sched_version':1,
                 'reservations':self.reservations,
                 'active':self.active,
-                'next_res_id':self.id_gen.idnum+1, 
-                'next_cycle_id':self.cycle_id_gen.idnum+1, 
-                'msg_queue': dbwriter.msg_queue, 
+                'next_res_id':self.id_gen.idnum + 1,
+                'next_cycle_id':self.cycle_id_gen.idnum + 1,
+                'msg_queue': dbwriter.msg_queue,
                 'overflow': dbwriter.overflow})
         return state
 
     def __setstate__(self, state):
         Component.__setstate__(self, state)
+        _init_accounting_log()
 
         self.reservations = state['reservations']
         if 'active' in state.keys():
@@ -659,13 +737,16 @@ class BGSched (Component):
         '''Exposed method for adding a reservation via setres.
 
         '''
-        self.logger.info("%s adding reservation: %r" % (user_name, specs))
+        self.logger.info("%s adding reservation: %r", user_name, specs)
+        for spec in specs:
+            spec['resource_list'] = ComponentProxy("system").get_location_statistics(spec['partitions'].split(':'))
+            logger.debug("Resource List: %s", spec['resource_list'])
         added_reservations =  self.reservations.q_add(specs)
         for added_reservation in added_reservations:
-            self.logger.info("Res %s/%s: %s adding reservation: %r" % 
-                             (added_reservation.res_id,
-                              added_reservation.cycle_id,
-                              user_name, specs))
+            self.logger.info("Res %s/%s: %s adding reservation: %r", added_reservation.res_id, added_reservation.cycle_id,
+                user_name, specs)
+            _write_to_accounting_log(accounting.confirmed(added_reservation.res_id, user_name, added_reservation.start,
+                added_reservation.duration, added_reservation.resource_list, added_reservation.project))
             dbwriter.log_to_db(user_name, "creating", "reservation", added_reservation)
         return added_reservations
 
@@ -675,13 +756,12 @@ class BGSched (Component):
         '''Exposed method for terminating a reservation from releaseres.
 
         '''
-        self.logger.info("%s releasing reservation: %r" % (user_name, specs))
+        self.logger.info("%s releasing reservation: %r", user_name, specs)
         del_reservations = self.reservations.q_del(specs)
         for del_reservation in del_reservations:
-            self.logger.info("Res %s/%s/: %s releasing reservation: %r" % 
-                             (del_reservation.res_id,
-                              del_reservation.cycle_id,
-                              user_name, specs))
+            _write_to_accounting_log(accounting.remove(del_reservation.res_id, user_name))
+            self.logger.info("Res %s/%s/: %s releasing reservation: %r", del_reservation.res_id,
+                              del_reservation.cycle_id, user_name, specs)
             #database logging moved to the ReservationDict q_del method
             #the expected message is "terminated"
         return del_reservations
@@ -705,36 +785,50 @@ class BGSched (Component):
         # handle defers as a special case:  have to log these,
         # they are frequent enough we don't want a full a mod record
         def _set_reservations(res, newattr):
+            '''callback to apply update to all modified reservations'''
             res.update(newattr)
         updates['__cmd_user'] = user_name
         mod_reservations = self.reservations.q_get(specs, _set_reservations, updates)
+        mod_reservation = mod_reservations[0]
+        try:
+            status = RealTimeAccounting.verify_reservation([{'resource_list': mod_reservation.resource_list,
+                                                            'project': mod_reservation.project,
+                                                            'name': mod_reservation.name,
+                                                            'duration': mod_reservation.duration,
+                                                            'start': mod_reservation.start,
+                                                            }])
+            logger.debug("STATUS %s", status)
+        except RealTimeAccounting.BadMessage:
+            logger.warning("Unable to verify reservation %s.  Bad message received by realtime interface.")
+        except RealTimeAccounting.ConnectionFailure:
+            logger.warning("Unable to verify reservation %s.  Connection failure in communicating to realtime interface.")
         for mod_reservation in mod_reservations:
-            self.logger.info("Res %s/%s: %s modifying reservation: %r" % 
-                             (mod_reservation.res_id,
-                              mod_reservation.cycle_id,
-                              user_name, specs))
+            logger.debug("%s", mod_reservation)
+            mod_reservation.resource_list = ComponentProxy("system").get_location_statistics(
+                    mod_reservation.partitions.split(':'))
+            _write_to_accounting_log(accounting.confirmed(mod_reservation.res_id, user_name, mod_reservation.start,
+                mod_reservation.duration, mod_reservation.resource_list, mod_reservation.project))
+            self.logger.info("Res %s/%s: %s modifying reservation: %r", mod_reservation.res_id,
+                              mod_reservation.cycle_id, user_name, specs)
         return mod_reservations
 
     set_reservations = exposed(query(set_reservations))
 
 
     def release_reservations(self, specs, user_name):
-        '''Exposed method used by releaseres for user-release of reserved 
-        resrouces.
+        '''Exposed method used by releaseres for user-release of reserved resources.
 
         '''
-        self.logger.info("%s requested release of reservation: %r",
-                user_name, specs)
+        self.logger.info("%s requested release of reservation: %r", user_name, specs)
         self.logger.info("%s releasing reservation: %r", user_name, specs)
         rel_res = self.get_reservations(specs)
         for res in rel_res:
-            dbwriter.log_to_db(user_name, "released", "reservation", res) 
+            dbwriter.log_to_db(user_name, "released", "reservation", res)
         del_reservations = self.reservations.q_del(specs)
         for del_reservation in del_reservations:
-            self.logger.info("Res %s/%s/: %s releasing reservation: %r" % 
-                             (del_reservation.res_id,
-                              del_reservation.cycle_id,
-                              user_name, specs))
+            _write_to_accounting_log(accounting.remove(del_reservation.res_id, user_name))
+            self.logger.info("Res %s/%s/: %s releasing reservation: %r", del_reservation.res_id,
+                              del_reservation.cycle_id, user_name, specs)
         return del_reservations
 
     release_reservations = exposed(query(release_reservations))
@@ -748,7 +842,7 @@ class BGSched (Component):
         reservations = self.reservations.values()
         for i in range(len(reservations)):
             for j in range(i+1, len(reservations)):
-                # if at least one reservation is cyclic, we want *that* 
+                # if at least one reservation is cyclic, we want *that*
                 # reservation to be the one getting its overlaps method called
                 if reservations[i].cycle is not None:
                     res1 = reservations[i]
@@ -757,8 +851,8 @@ class BGSched (Component):
                     res1 = reservations[j]
                     res2 = reservations[i]
 
-                # we subtract a little bit because the overlaps method isn't 
-                # really meant to do this it will report warnings when one 
+                # we subtract a little bit because the overlaps method isn't
+                # really meant to do this it will report warnings when one
                 # reservation starts at the same time another ends
                 if res1.overlaps(res2.start, res2.duration - 0.00001):
                     # now we need to check for overlap in space
@@ -808,10 +902,10 @@ class BGSched (Component):
             job_location_args = []
             #FIXME: make sure job_location_args is ordered.
             for job in active_jobs:
-                job_location_args.append( 
-                    { 'jobid': str(job.jobid), 
-                      'nodes': job.nodes, 
-                      'queue': job.queue, 
+                job_location_args.append(
+                    { 'jobid': str(job.jobid),
+                      'nodes': job.nodes,
+                      'queue': job.queue,
                       'required': cur_res.partitions.split(":"),
                       'utility_score': job.score,
                       'walltime': job.walltime,
@@ -865,7 +959,7 @@ class BGSched (Component):
         self.sync_data()
 
         # if we're missing information, don't bother trying to schedule jobs
-        if not (self.queues.__oserror__.status and 
+        if not (self.queues.__oserror__.status and
                 self.jobs.__oserror__.status):
             self.sync_state.Fail()
             return
@@ -876,12 +970,12 @@ class BGSched (Component):
             # cleanup any reservations which have expired
             for res in self.reservations.values():
                 if res.is_over():
-                    self.logger.info("reservation %s has ended; removing" % 
+                    self.logger.info("reservation %s has ended; removing" %
                             (res.name))
-                    self.logger.info("Res %s/%s: Ending reservation: %r" % 
+                    self.logger.info("Res %s/%s: Ending reservation: %r" %
                              (res.res_id, res.cycle_id, res.name))
-                    #dbwriter.log_to_db(None, "ending", "reservation", 
-                    #        res) 
+                    #dbwriter.log_to_db(None, "ending", "reservation",
+                    #        res)
                     del_reservations = self.reservations.q_del([
                         {'name': res.name}])
 
@@ -1009,10 +1103,10 @@ class BGSched (Component):
                         if cur_res.block_passthrough:
                             pt_blocking_locations.update(cur_res.partitions.split(':'))
 
-                job_location_args.append( 
-                    { 'jobid': str(job.jobid), 
-                      'nodes': job.nodes, 
-                      'queue': job.queue, 
+                job_location_args.append(
+                    { 'jobid': str(job.jobid),
+                      'nodes': job.nodes,
+                      'queue': job.queue,
                       'forbidden': list(forbidden_locations),
                       'pt_forbidden': list(pt_blocking_locations),
                       'utility_score': job.score,
@@ -1096,5 +1190,5 @@ class BGSched (Component):
     def __flush_msg_queue(self):
         """Send queued messages to the database-writer component"""
         return dbwriter.flush_queue()
-    __flush_msg_queue = automatic(__flush_msg_queue, 
+    __flush_msg_queue = automatic(__flush_msg_queue,
                 float(get_bgsched_config('db_flush_interval', 10)))

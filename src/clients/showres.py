@@ -58,7 +58,7 @@ def main():
 
     if not parser.no_args():
         client_utils.logger.error("No arguments needed")
-    
+
     if parser.options.verbose != None and parser.options.really_verbose != None:
         client_utils.logger.error('Only use -l or -x not both')
         sys.exit(1)
@@ -67,10 +67,10 @@ def main():
     if 'cluster' in client_utils.component_call(SYSMGR, False, 'get_implementation', ()):
         cluster = True
 
-    reservations = client_utils.component_call(SCHMGR, False, 'get_reservations', 
-                                               ([{'name':'*', 'users':'*','start':'*', 'duration':'*', 'partitions':'*', 
-                                                  'cycle': '*', 'queue': '*', 'res_id': '*', 'cycle_id': '*','project':'*', 
-                                                  'block_passthrough':'*'}], ))
+    reservations = client_utils.component_call(SCHMGR, False, 'get_reservations',
+                                               ([{'name':'*', 'users':'*','start':'*', 'duration':'*', 'partitions':'*',
+                                                   'cycle': '*', 'queue': '*', 'res_id': '*', 'cycle_id': '*', 'active_id':'*',
+                                                   'project':'*', 'block_passthrough':'*', 'resource_list':'*'}], ))
 
     output = []
 
@@ -84,8 +84,8 @@ def main():
                    'End Time', 'Cycle Time', 'Passthrough', 'Partitions', 'Remaining', 'T-Minus')]
     elif parser.options.really_verbose:
         really_verbose = True
-        header = [('Reservation', 'Queue', 'User', 'Start', 'Duration','End Time', 'Cycle Time','Passthrough','Partitions', 
-                   'Project', 'ResID', 'CycleID', 'Remaining', 'T-Minus' )]
+        header = [('Reservation', 'Queue', 'User', 'Start', 'Duration','End Time', 'Cycle Time','Passthrough','Partitions',
+                   'Project', 'ResID', 'CycleID', 'ActiveID', 'Remaining', 'T-Minus', 'ResourceList' )]
 
     for res in reservations:
 
@@ -102,19 +102,19 @@ def main():
         remaining = "00:00:00" if '-' in remaining else remaining
         tminus    = "active" if deltatime >= 0.0 else client_utils.get_elapsed_time(deltatime, duration, True)
 
-        # do some crazy stuff to make reservations which cycle display the 
+        # do some crazy stuff to make reservations which cycle display the
         # "next" start time
         if res['cycle']:
             cycle = float(res['cycle'])
             periods = math.floor((now - start)/cycle)
-            # reservations can't become active until they pass the start time 
+            # reservations can't become active until they pass the start time
             # -- so negative periods aren't allowed
             if periods < 0:
                 pass
             # if we are still inside the reservation, show when it started
             elif (now - start) % cycle < duration:
                 start += periods * cycle
-            # if we are in the dead time after the reservation ended, show 
+            # if we are in the dead time after the reservation ended, show
             # when the next one starts
             else:
                 start += (periods+1) * cycle
@@ -134,7 +134,7 @@ def main():
 
         time_fmt = "%c"
         starttime = time.strftime(time_fmt, time.localtime(start))
-        endtime   = time.strftime(time_fmt, time.localtime(start + duration)) 
+        endtime   = time.strftime(time_fmt, time.localtime(start + duration))
 
         if parser.options.oldts == None:
             #time_fmt += " %z (%Z)"
@@ -142,24 +142,25 @@ def main():
             endtime = client_utils.sec_to_str(start + duration)
 
         if really_verbose:
-            output.append((res['name'], res['queue'], res['users'], 
+            output.append((res['name'], res['queue'], res['users'],
                            starttime,"%02d:%02d" % (dhour, dmin),
                            endtime, cycle, passthrough,
-                           mergelist(res['partitions'], cluster), 
-                           res['project'], res['res_id'], res['cycle_id'], remaining, tminus))
+                           mergelist(res['partitions'], cluster),
+                           res['project'], res['res_id'], res['cycle_id'], res['active_id'], remaining, tminus,
+                           res['resource_list']))
         elif verbose:
-            output.append((res['name'], res['queue'], res['users'], 
+            output.append((res['name'], res['queue'], res['users'],
                            starttime,"%02d:%02d" % (dhour, dmin),
                            endtime, cycle, passthrough,
-                           mergelist(res['partitions'], cluster), 
+                           mergelist(res['partitions'], cluster),
                            remaining, tminus))
         else:
-            output.append((res['name'], res['queue'], res['users'], 
+            output.append((res['name'], res['queue'], res['users'],
                            starttime,"%02d:%02d" % (dhour, dmin), passthrough,
-                           mergelist(res['partitions'], cluster), 
+                           mergelist(res['partitions'], cluster),
                            remaining, tminus))
 
-    output.sort( (lambda x,y: cmp( time.mktime(time.strptime(x[3].split('+')[0].split('-')[0].strip(), time_fmt)), 
+    output.sort( (lambda x,y: cmp( time.mktime(time.strptime(x[3].split('+')[0].split('-')[0].strip(), time_fmt)),
                                    time.mktime(time.strptime(y[3].split('+')[0].split('-')[0].strip(), time_fmt))) ) )
     client_utils.print_tabular(header + output)
 

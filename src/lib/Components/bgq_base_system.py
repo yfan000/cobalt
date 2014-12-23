@@ -3,7 +3,7 @@
 Classes:
 NodeCard -- node cards make up Partitions
 Block -- atomic set of nodes
-BlockDict -- default container for blocks
+/BlockDict -- default container for blocks
 ProcessGroup -- virtual process group running on the system
 ProcessGroupDict -- default container for process groups
 BGBaseSystem -- base system component
@@ -701,7 +701,7 @@ class BGProcessGroupDict(ProcessGroupDict):
 
 
 class BGBaseSystem (Component):
-    """base system class. 
+    """base system class.
 
     Methods:
     add_blocks -- tell the system to manage blocks (exposed, query)
@@ -716,6 +716,8 @@ class BGBaseSystem (Component):
     initiate_proxy_boot -- prompt the system component to start booting a compute block
     set_autoreboot -- set autoreboot flags for IO blocks
 
+    get_location_statistics -- given a list of locations, return the list of resource statistics for
+        the overlapping set
 
     Note: This class uses Python's threading module.
 
@@ -1306,11 +1308,11 @@ class BGBaseSystem (Component):
             job_block = blocks[name]
             for child in job_block._children:
                 if child.backfill_time < job_end_times[name]:
-                    child.backfill_time = job_block.backfill_time
+                     child.backfill_time = job_block.backfill_time
 
 
     def find_job_location(self, arg_list, end_times, pt_blocking_locations=[]):
-        ''' get the best location for a job.
+        ''' get th e best location for a job.
 
         '''
 
@@ -1604,3 +1606,49 @@ class BGBaseSystem (Component):
     def disable_io_autoreboot(self):
         '''Disable ION autorebooting on the BG/Q'''
         raise NotImplementedError, "ION Autoreboot not supported for this configuration."
+
+    @exposed
+    def get_location_statistics(self, loc_list):
+        '''Get a list of the aggregate location statistics for a list of
+        partitions/locations.  This list may contain partially overlapping
+        members and may also include entirely disjoint members.
+
+        Inputs:
+        loc_list -- a list of string location names.  All locations must be
+                    valid locations in the BlueGene control system.  If an
+                    invalid location is in the list, an exception will
+                    be raised.
+
+        Outputs:
+        A dictionary containing key-value pairs for resources submitted.
+        ex: {'nodect': 512:, 'nprocs':8192}
+        statistics
+
+        Exceptions:
+        KeyError -- if an invalid location name is given, a key error will be raised
+
+        Notes: returned statistics are system-component dependent.
+
+        '''
+        stats = {'nodect': 0,
+                 'nproc': 0,
+                }
+        blocks = []
+        node_cards = set([])
+        PROCS_PER_NODE = 16
+        for loc in loc_list:
+            try:
+                block = self._blocks[loc]
+            except KeyError:
+                #if there is no block for the location raise that we have a bad value in the list
+                err_str = "Block %s not found in block cache." % loc
+                self.logger.error(err_str)
+                raise KeyError(err_str)
+            blocks.append(block)
+            self.logger.debug("BLOCKS: %s", blocks)
+            node_cards.update(block.node_cards)
+            self.logger.debug("NODES: %s", node_cards)
+        stats['nodect'] = len(node_cards) * 32
+        stats['nproc'] = len(node_cards) * 32 * PROCS_PER_NODE
+        self.logger.debug("STATS: %s", stats)
+        return stats
