@@ -111,7 +111,7 @@ def validate_args(parser,spec,opt_count):
     if only_id_change:
 
         # make the ID change and we are done with setres
-        
+
         if parser.options.res_id != None:
             set_res_id(parser)
         if parser.options.cycle_id != None:
@@ -146,13 +146,14 @@ def validate_args(parser,spec,opt_count):
             verify_locations(parser.args)
 
         # if we have command line arguments put them in spec
-        if not parser.no_args(): spec['partitions'] = ":".join(parser.args)
+        if not parser.no_args():
+            spec['partitions'] = ":".join(parser.args)
 
         continue_processing_options = True # continue, setres is not done.
 
     return continue_processing_options
 
-        
+
 def modify_reservation(parser):
     """
     this will handle reservation modifications
@@ -177,7 +178,7 @@ def modify_reservation(parser):
         now      = time.time()
         periods  = math.floor((now - start)/cycle)
 
-        if(periods < 0):
+        if periods < 0:
             start += cycle
         elif(now - start) % cycle < duration:
             start += (periods + 1) * cycle
@@ -210,23 +211,25 @@ def modify_reservation(parser):
 
     comp_args = ([{'name':parser.options.name}], updates, client_utils.getuid())
     client_utils.component_call(SCHMGR, False, 'set_reservations', comp_args)
-    reservations = client_utils.component_call(SCHMGR, False, 'get_reservations', 
-                                               ([{'name':parser.options.name, 'users':'*','start':'*', 'duration':'*', 'partitions':'*', 
-                                                  'cycle': '*', 'res_id': '*', 'project':'*', 'block_passthrough':'*'}], ))
+    reservations = client_utils.component_call(SCHMGR, False, 'get_reservations',
+                                               ([{'name':parser.options.name, 'users':'*','start':'*', 'duration':'*',
+                                                   'partitions':'*', 'cycle': '*', 'res_id': '*', 'project':'*',
+                                                   'block_passthrough':'*'}], ))
     client_utils.logger.info(reservations)
     client_utils.logger.info(client_utils.component_call(SCHMGR, False, 'check_reservations', ()))
 
 def add_reservation(parser,spec,user):
     """
-    add reservation 
+    add reservation
     """
     validate_starttime(parser)
 
     spec['users']   = None if parser.options.users == '*' else parser.options.users
-    spec['cycle']   = parser.options.cycle 
+    spec['cycle']   = parser.options.cycle
     spec['project'] = parser.options.project
 
-    if parser.options.block_passthrough == None: spec['block_passthrough'] = False
+    if parser.options.block_passthrough == None:
+        spec['block_passthrough'] = False
 
     client_utils.logger.info(client_utils.component_call(SCHMGR, False, 'add_reservations', ([spec], user)))
     client_utils.logger.info(client_utils.component_call(SCHMGR, False, 'check_reservations', ()))
@@ -249,7 +252,7 @@ def main():
         [ cb_date                , (True,) ], # Allow to set the date to 'now'
         [ cb_passthrough         , () ],
         [ cb_debug               , () ],
-        [ cb_res_users           , () ]] 
+        [ cb_res_users           , () ]]
 
     # Get the version information
     opt_def =  __doc__.replace('__revision__',__revision__)
@@ -268,7 +271,7 @@ def main():
         # modify an existing reservation
         if parser.options.modify_res != None:
             modify_reservation(parser)
-        
+
         # add new reservation
         else:
             add_reservation(parser,spec,user)
@@ -278,6 +281,6 @@ if __name__ == '__main__':
         main()
     except SystemExit:
         raise
-    except Exception, e:
-        client_utils.logger.fatal("*** FATAL EXCEPTION: %s ***", e)
+    except Exception, exc:
+        client_utils.logger.fatal("*** FATAL EXCEPTION: %s ***", exc)
         sys.exit(1)
