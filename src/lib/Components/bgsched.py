@@ -175,10 +175,36 @@ class Reservation (Data):
             del spec['defer']
             deferred = True
 
+        if spec.has_key('partitions'):
+            self.resource_list = ComponentProxy("system").get_location_statistics(spec['partitions'].split(':'))
+
+        write_mod_message = True
+        if self.running and spec.has_key('start'):
+            #if we are modifying a reservation's start time for an actively running reservation, then
+            #we need to emit a specific set of records so an accounting system can sanely determine holds.
+            #The reservation will have to "system remove (stop), modify, and then begin"  the active id will
+            #be incremented for the new begin.  Our normal mechanisms don't catch this in the is_active check
+            #since the reservation will never actually go inactive.
+            if int(spec['start']) > int(self.start) and int(spec['start']) < (int(self.start) + int(self.duration)):
+                logger.warning("Res %s/%s/%s: WARNING: start time changed during reservation to time within duration.",
+                        self.res_id, self.cycle_id, self.name)
+                _write_to_accounting_log(accounting.system_remove(self.res_id, "Scheduler", self.ctime, self.stime,
+                    int(time.time()), self.resource_list, self.active_id, self.project))
+                #have to increment here, since we will not actually trigger from going inactive.
+                self.active_id = self.active_id_gen.get()
+                _write_to_accounting_log(accounting.confirmed(self.res_id, user_name, self.start, self.duration,
+                    self.resource_list, self.project))
+                _write_to_accounting_log(accounting.begin(self.res_id, user_name, self.queue, self.ctime,
+                    int(self.start), int(self.start) + int(self.duration), int(self.duration),
+                    self.partitions, self.users, self.resource_list, self.active_id, name=self.name, account=self.project,
+                    authorized_groups=None, authorized_hosts=None))
+                write_mod_message = False
+
         Data.update(self, spec)
 
-        _write_to_accounting_log(accounting.confirmed(self.res_id, user_name, self.start, self.duration,
-            self.resource_list, self.project))
+        if write_mod_message:
+            _write_to_accounting_log(accounting.confirmed(self.res_id, user_name, self.start, self.duration,
+                self.resource_list, self.project))
         if not deferred or not self.running:
             #we only want this if we aren't deferring.  If we are, the cycle will
             #take care of the new data object creation.
@@ -327,7 +353,7 @@ class Reservation (Data):
                     user = self.users[0]
                 _write_to_accounting_log(accounting.begin(self.res_id, user, self.queue, self.ctime,
                     int(self.start), int(self.start) + int(self.duration), int(self.duration),
-                    self.partitions, self.users, self.resource_list, name=self.name, account=self.project,
+                    self.partitions, self.users, self.resource_list, self.active_id, name=self.name, account=self.project,
                     authorized_groups=None, authorized_hosts=None))
                 dbwriter.log_to_db(None, "activating", "reservation", self)
             return True
@@ -432,7 +458,6 @@ class ReservationDict (DataDict):
                 spec['resource_list'] = ComponentProxy("system").get_location_statistics(spec['partitions'].split(':'))
                 try:
                     status = RealTimeAccounting.verify_reservation([spec])
-                    logger.debug("STATUS %s", status[0])
                 except RealTimeAccounting.BadMessage:
                     logger.warning("Unable to verify reservation %s.  Bad message received by realtime interface.")
                 except RealTimeAccounting.ConnectionFailure:
@@ -740,7 +765,6 @@ class BGSched (Component):
         self.logger.info("%s adding reservation: %r", user_name, specs)
         for spec in specs:
             spec['resource_list'] = ComponentProxy("system").get_location_statistics(spec['partitions'].split(':'))
-            logger.debug("Resource List: %s", spec['resource_list'])
         added_reservations =  self.reservations.q_add(specs)
         for added_reservation in added_reservations:
             self.logger.info("Res %s/%s: %s adding reservation: %r", added_reservation.res_id, added_reservation.cycle_id,
@@ -759,7 +783,7 @@ class BGSched (Component):
         self.logger.info("%s releasing reservation: %r", user_name, specs)
         del_reservations = self.reservations.q_del(specs)
         for del_reservation in del_reservations:
-            _write_to_accounting_log(accounting.remove(del_reservation.res_id, user_name))
+            _write_to_accounting_log(accounting.remove(del_reservation.res_id, user_name, del_reservation.active_id))
             self.logger.info("Res %s/%s/: %s releasing reservation: %r", del_reservation.res_id,
                               del_reservation.cycle_id, user_name, specs)
             #database logging moved to the ReservationDict q_del method
@@ -791,23 +815,17 @@ class BGSched (Component):
         mod_reservations = self.reservations.q_get(specs, _set_reservations, updates)
         mod_reservation = mod_reservations[0]
         try:
+            #this is strictly advisory and allows us to warn admins based on what they've set for reservations.
             status = RealTimeAccounting.verify_reservation([{'resource_list': mod_reservation.resource_list,
                                                             'project': mod_reservation.project,
                                                             'name': mod_reservation.name,
                                                             'duration': mod_reservation.duration,
                                                             'start': mod_reservation.start,
                                                             }])
-            logger.debug("STATUS %s", status)
         except RealTimeAccounting.BadMessage:
             logger.warning("Unable to verify reservation %s.  Bad message received by realtime interface.")
         except RealTimeAccounting.ConnectionFailure:
             logger.warning("Unable to verify reservation %s.  Connection failure in communicating to realtime interface.")
-        for mod_reservation in mod_reservations:
-            logger.debug("%s", mod_reservation)
-            mod_reservation.resource_list = ComponentProxy("system").get_location_statistics(
-                    mod_reservation.partitions.split(':'))
-            _write_to_accounting_log(accounting.confirmed(mod_reservation.res_id, user_name, mod_reservation.start,
-                mod_reservation.duration, mod_reservation.resource_list, mod_reservation.project))
             self.logger.info("Res %s/%s: %s modifying reservation: %r", mod_reservation.res_id,
                               mod_reservation.cycle_id, user_name, specs)
         return mod_reservations
@@ -826,7 +844,7 @@ class BGSched (Component):
             dbwriter.log_to_db(user_name, "released", "reservation", res)
         del_reservations = self.reservations.q_del(specs)
         for del_reservation in del_reservations:
-            _write_to_accounting_log(accounting.remove(del_reservation.res_id, user_name))
+            _write_to_accounting_log(accounting.remove(del_reservation.res_id, user_name, del_reservation.active_id))
             self.logger.info("Res %s/%s/: %s releasing reservation: %r", del_reservation.res_id,
                               del_reservation.cycle_id, user_name, specs)
         return del_reservations
@@ -918,7 +936,6 @@ class BGSched (Component):
             # best_partition_dict.  There is no draining, backfill windows are
             # meaningless within reservations.
             try:
-                self.logger.debug("calling from reservation")
                 best_partition_dict = ComponentProxy("system").find_job_location(job_location_args, [])
             except:
                 self.logger.error("failed to connect to system component")
@@ -1118,7 +1135,6 @@ class BGSched (Component):
                     } )
 
             try:
-                self.logger.debug("calling from main sched %s", eq_class)
                 best_partition_dict = ComponentProxy("system").find_job_location(job_location_args, end_times)
             except:
                 self.logger.error("failed to connect to system component")

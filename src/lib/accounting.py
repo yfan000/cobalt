@@ -69,7 +69,7 @@ def abort (job_id, user, resource_list, account=None, resource=RESOURCE_NAME):
     return entry("A", job_id, message)
 
 @reservation_record
-def begin (id_string, owner, queue, ctime, start, end, duration, exec_host, authorized_users, resource_list, name=None,
+def begin (id_string, owner, queue, ctime, start, end, duration, exec_host, authorized_users, resource_list, active_id, name=None,
         account=None, authorized_groups=None, authorized_hosts=None, resource=RESOURCE_NAME):
 
     """Beginning of reservation period.
@@ -94,7 +94,7 @@ def begin (id_string, owner, queue, ctime, start, end, duration, exec_host, auth
     """
 
     message = {'owner':owner, 'queue':queue, 'ctime':ctime, 'start':start, 'end':end, 'duration':duration, 'exec_host':exec_host,
-            'authorized_users':authorized_users, 'Resource_List':resource_list, 'resource':resource}
+            'authorized_users':authorized_users, 'Resource_List':resource_list, 'active_id': active_id, 'resource':resource}
     if name is not None:
         message['name'] = name
     if account is not None:
@@ -195,7 +195,7 @@ def finish (reservation_id, resource=RESOURCE_NAME):
     return entry("F", reservation_id, {'resource':resource})
 
 @reservation_record
-def system_remove (reservation_id, requester, ctime, stime, etime, resource_list, account=None ,resource=RESOURCE_NAME):
+def system_remove (reservation_id, requester, ctime, stime, etime, resource_list, active_id, account=None, resource=RESOURCE_NAME):
 
     """Scheduler or server requested removal of the reservation.
 
@@ -206,13 +206,13 @@ def system_remove (reservation_id, requester, ctime, stime, etime, resource_list
     #Note: for charging purposes, this is closest to the 'E' record.  This
     #indicates the job data that should actually be charged.
     msg = {'requester':requester, 'ctime':int(ctime), 'stime':int(stime), 'etime':int(etime),
-            'Resource_List':resource_list, 'resource':resource}
+            'Resource_List':resource_list, 'active_id': active_id, 'resource':resource}
     if account is not None:
         msg['account'] = account
     return entry("K", reservation_id, msg)
 
 @reservation_record
-def remove (reservation_id, requester, resource=RESOURCE_NAME):
+def remove (reservation_id, requester, active_id, resource=RESOURCE_NAME):
 
     """Resource reservation terminated by ordinary client.
 
@@ -221,7 +221,7 @@ def remove (reservation_id, requester, resource=RESOURCE_NAME):
     requester -- user@host to identify who deleted the resource reservation
     """
 
-    return entry("k", reservation_id, {'requester':requester, 'resource':resource})
+    return entry("k", reservation_id, {'requester':requester, 'active_id': active_id, 'resource':resource})
 
 @job_record
 def queue (job_id, queue, user, resource_list, account=None, resource=RESOURCE_NAME):
