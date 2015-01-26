@@ -1337,6 +1337,7 @@ class Job (StateMachine):
             self._sm_log_info("no holds remain; releasing job", cobalt_log = True)
             self.__timers['hold'].stop()
             self.etime = time.time()
+            self.total_etime = 0.0
             self._sm_state = queued_state
 
     def _sm_ready__run(self, args):
@@ -3681,7 +3682,11 @@ class QueueManager(Component):
                                     "job_prog", JobProgDepFracMsg(job))
                         else:
                             new_score = job.dep_frac * job.score
-                        waiting_job.score = max(waiting_job.score, new_score)
+                        # update with new_score iff waiting_job.project == job.project
+                        if waiting_job.project == job.project:
+                            waiting_job.score = max(waiting_job.score, new_score)
+                        else:
+                            waiting_job.score = max(waiting_job.score, 0.0)
 
         # remove the job from the queue
         #

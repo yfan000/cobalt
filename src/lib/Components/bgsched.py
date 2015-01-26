@@ -140,6 +140,12 @@ class Reservation (Data):
         self.ctime = int(time.time())
         self.stime = spec.get('stime', None)
         self.resource_list = spec['resource_list']
+        self.deleting = False
+
+    def _get_active(self):
+        return self.is_active()
+
+    active = property(_get_active)
 
     def update (self, spec):
         '''Update reservations with changes based on a dictionary.  This
@@ -343,7 +349,7 @@ class Reservation (Data):
         else:
             now = stime - self.start
 
-        if now <= self.duration:
+        if now <= self.duration and not self.deleting:
             if not self.running:
                 self.running = True
                 self.stime = int(time.time())
@@ -499,6 +505,7 @@ class ReservationDict (DataDict):
                       Logs that the reservation has terminated.
                       Emits a terminated database record
                       Attempts to mark the queue dead in the queue-manager.
+                      Marks the reservation as dying
 
         '''
         reservations = Cobalt.Data.DataDict.q_del(self, *args, **kwargs)
@@ -513,6 +520,7 @@ class ReservationDict (DataDict):
             logger.error("problem disabling reservation queue (%s)" % err)
 
         for reservation in reservations:
+            reservation.deleting = True #Do not let the is_active check succeed.
             #This should be the last place we have handles to reservations,
             #after this they're heading to GC.
             if reservation.is_active():
