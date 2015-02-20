@@ -81,6 +81,7 @@ import ConfigParser
 import signal
 import thread
 import traceback
+import copy
 import string
 
 
@@ -93,15 +94,13 @@ from Cobalt.StateMachine import StateMachine
 from Cobalt.Components.base import Component, exposed, automatic, query
 from Cobalt.Proxy import ComponentProxy
 from Cobalt.Exceptions import (QueueError, ComponentLookupError, DataStateError, StateMachineIllegalEventError,
-    JobProcessingError, JobRunError, JobPreemptionError, JobDeleteError, ResourceReservationFailure, JobValidationError)
+    JobProcessingError, JobRunError, JobPreemptionError, JobDeleteError, ResourceReservationFailure, JobValidationError,
+    InvalidResponse)
 from Cobalt import accounting
 from Cobalt.Util import get_config_option, init_cobalt_config
 from Cobalt.PathImporter import import_from_config
-#site-local specified imports.
-try:
-    RealTimeAccounting = import_from_config('RTAccounting', 'path', 'module_name')
-except ImportError:
-    import Cobalt.RTAccounting.stub_interface as RealTimeAccounting
+
+import Cobalt.RTAccounting.constants as accounting_const
 
 init_cobalt_config()
 
@@ -110,8 +109,37 @@ SERVICE_NAME = 'cqm'
 RESOURCE_NAME = get_config_option('system', 'resource_name', 'default')
 REALTIME_INTERFACE_ERRORS_FATAL = get_config_option('accounting', 'exceptions_fatal', False)
 
+
 logger = logging.getLogger(__name__.split('.')[-1])
 
+#site-local specified imports. Do these after we have logging so we can sanely log that
+#an import of a Real time accounting module went bad.
+import Cobalt.RTAccounting.stub_interface as RTAFallbackInterface # The do-nothing will at least allow scheduling to continue
+try:
+    RealTimeAccounting = import_from_config('RTAccounting', 'path', 'module_name')
+except ImportError as exc:
+    logger.critical("Error importing Real Time Accounting module: %s", str(exc))
+    logger.critical("Unable to import configured realtime accounting module.", exc_info=True)
+    logger.critical("Falling back to realtime accounting stub interface.")
+    RealTimeAccounting = RTAFallbackInterface
+
+_error_response = get_config_option('accounting', 'error_response', 'continue')
+
+REALTIME_INTERFACE_BAD_RESPONSE_FALLBACK = False
+REALTIME_INTERFACE_BAD_RESPONSE_CONTINUE = False
+REALTIME_INTERFACE_BAD_RESPONSE_IGNORE = False
+if _error_response == 'continue':
+    REALTIME_INTERFACE_BAD_RESPONSE_CONTINUE = True
+elif _error_response == 'ignore':
+    REALTIME_INTERFACE_BAD_RESPONSE_IGNORE = True
+elif _error_response == 'fallback':
+    REALTIME_INTERFACE_BAD_RESPONSE_FALLBACK = True
+else:
+    logger.critical("accounting section error_response value must be one of 'continue', 'ignore', or 'fallback'.")
+    logger.critical("Aborting startup due to configuration error.")
+    sys.exit(1)
+
+#ID Generators
 cqm_id_gen = None
 run_id_gen = None #IncrID()
 
@@ -207,6 +235,10 @@ def has_semi_private_attr(obj, attr):
     assert attr[0:1] == "_"
     return hasattr(obj, attr)
 
+def _revert_to_fallback_rta_interface():
+    '''Revert to our stub plugin of last resort, in the event of a failure of a site-supplied realtime accounting plugin.'''
+    global RealTimeAccounting
+    RealTimeAccounting = RTAFallbackInterface
 
 class Signal_Map (object):
     checkpoint = 'SIGUSR1'
@@ -3761,36 +3793,32 @@ class QueueManager(Component):
         return walltime_p
 
     def add_jobs(self, specs):
-        '''Add a job, throws in adminemail'''
+        '''Add a job.
+        Input:
+            specs - a list of dictionaries specifying jobs to queue
+        Output:
+            a list of dictionaries containing jobid, status, and reason fields.
+        Side Effects:
+            Any jobs created will be added to queues.  Also, the job spec will
+            be modified to add in the adminemail field for a given queue.
+            A predicted walltime may also be added automatically.
+        Exceptions:
+            QueueError: Cobalt was unable to queue the list of jobs.
 
-        queue_names = self.Queues.keys()
+        '''
 
+        maxtime = get_cqm_config('max_walltime', None)
         failed = False
+        added_jobs = []
+        warn_jobs = []
         for spec in specs:
-            try:
-                failed, failure_msg = self._verify_job_spec(spec, False)
-            except RealTimeAccounting.BadMessage:
-                self.logger.error('Bad message sent to realtime accounting system.')
-                if REALTIME_INTERFACE_ERRORS_FATAL:
-                    raise
-                else:
-                    failed = False
-                    failure_msg = 'Bad messge recieved by realtime accounting system.'
-            except RealTimeAccounting.ConnectionFailure:
-                self.logger.error('Failed to connect to realtime accounting system.')
-                if REALTIME_INTERFACE_ERRORS_FATAL:
-                    raise
-                else:
-                    failed = False
-                    failure_msg = 'Error Connecting to realtime accounting system.'
             if spec['queue'] in self.Queues:
                 if 'walltime' in spec:
                     if float(spec['walltime']) <= 0 and 'maxtime' not in self.Queues[spec['queue']].restrictions:
-                        maxtime = get_cqm_config('max_walltime', None)
                         if not maxtime:
                             failure_msg = 'No Max Walltime default or for queue "%s" defined. Please contact system administrator' % spec['queue']
                             logger.error(failure_msg)
-                            raise QueueError, failure_msg
+                            raise QueueError(failure_msg)
 
                 spec.update({'adminemail':self.Queues[spec['queue']].adminemail})
                 if walltime_prediction_enabled:
@@ -3803,69 +3831,77 @@ class QueueManager(Component):
                 logger.error(failure_msg)
                 failed = True
         if failed:
-            raise QueueError, failure_msg
+            raise QueueError(failure_msg)
 
         response = self.Queues.add_jobs(specs, self.__add_job_terminal_action)
-        return response
+        try:
+            warn_jobs = self._check_job_accounting([job.jobid for job in response])
+        except InvalidResponse as exc:
+            self.logger.error("An error occurred with the accounting system.", exc_info=True)
+            self.logger.error("Triggering error was: %s", exc.triggering_exc)
+            self.logger.error("Jobs %s were added, but accounting verification failed.", response)
+        else:
+            added_jobs = response
+        self.logger.debug('added_jobs: %s', added_jobs)
+        return added_jobs
+
     add_jobs = exposed(query(add_jobs))
 
     def get_jobs(self, specs):
         return self.Queues.get_jobs(specs)
     get_jobs = exposed(query(get_jobs))
 
-    def set_jobs(self, specs, updates, user_name=None, advisory=False):
+    def set_jobs(self, specs, updates, user_name=None, force=False):
+        '''Set attributes contained in updates on jobs specified by specs.
+        Any field specified by updates will be changed.
+        Inputs:
+            specs     - A list of dictionaries that specify jobs to be
+                        modified. Jobid must be included in each spec.
+            updates   - A dictionary containing fields to update in a job and
+                        their new values.  New keys will be created for keys
+                        that currently do not exist in a job, and current
+                        fields will be set to new values in the new spec.
+                        If jobid is included in this field, it will be ignored.
+            user_name - (default: None) The name of the user requesting the
+                        change, if any.
+            force     - (default False) If True, force the changes to be set.
+                        This is intended for administrative commands.
+
+        Outputs:
+            Returns a list of modified jobs, and a list of failed modifications.
+
+        Side Effects:
+            Specified jobs will have their fields updates. This may cause state
+            transitions to occur in jobs.
+
+        Exceptions:
+            QueueError - The changes would result in a job no longer being
+                         queueable, or would no longer conform to policy, and
+                         the changes have been rejected.
+
+        '''
+        modified_jobs = []
+        warn_jobs = []
         joblist = self.Queues.get_jobs(specs)
-
         logger.info("%s calling set_jobs on %s with updates %s", user_name, specs, updates)
-
         new_q_name = None
         if updates.has_key("queue"):
             new_q_name = updates["queue"]
             if new_q_name not in self.Queues:
-                logger.error("attempted to move a job to non-existent queue '%s'" % new_q_name)
-                raise QueueError, "Error: queue '%s' does not exist" % new_q_name
-
+                logger.error("attempted to move a job to non-existent queue '%s'", new_q_name)
+                raise QueueError("Error: queue '%s' does not exist" % new_q_name)
             for job in joblist:
                 if job.is_active or job.has_completed:
-                    raise QueueError, "job %d is running; it cannot be moved" % job.jobid
-        failure_info = []
-        for job in joblist:
-            #check to see if updated job would be allowed by accounting system
-            try:
-                failed, failure_msg =  self._verify_job_spec(updates, advisory)
-            except RealTimeAccounting.BadMessage:
-                failed = False
-                failure_msg = 'Bad message received by realtime accounting system.'
-                self.logger.error(failure_msg)
-                if REALTIME_INTERFACE_ERRORS_FATAL:
-                    raise
-            except RealTimeAccounting.ConnectionFailure:
-                failed = False
-                failure_msg = 'Error Connecting to realtime accounting system.'
-                self.logger.error(failure_msg)
-                if REALTIME_INTERFACE_ERRORS_FATAL:
-                    raise
-            if failed and not advisory:
-                msg = "Unable to modify job %s.  Reason: %s" % (job.jobid, failure_msg)
-                logger.info(msg)
-                failure_info.append("%s: %s" % (job.jobid, failure_msg))
-                continue #go onto other jobs.  Do not modify this one.
-            elif failed:
-                msg = "Accounting system reports issue for job %s.  Reason: %s" % (job.jobid, failure_msg)
-                logger.info(msg)
-        if failure_info != []:
-            error_msg = "Unable to modify all specified jobs.  No modifications executed.\nReasons:\n%s" % "\n".join(failure_info)
-            raise JobValidationError(error_msg)
-
+                    raise QueueError("job %d is running; it cannot be moved" % job.jobid)
         for job in joblist:
             old_q_name = job.queue
             test = job.to_rx()
             test.update(updates)
+
             #if we are requesting a change in hold:
             set_user_hold = updates.get('user_hold', None)
             set_admin_hold = updates.get('admin_hold', None)
             set_accounting_hold = updates.get('accounting_hold', None)
-
             if set_admin_hold and not job.admin_hold:
                 dbwriter.log_to_db(user_name, "admin_hold", "job_prog", JobProgMsg(job))
             elif set_admin_hold == False and job.admin_hold:
@@ -3874,14 +3910,16 @@ class QueueManager(Component):
                 dbwriter.log_to_db(user_name, "user_hold", "job_prog", JobProgMsg(job))
             elif set_user_hold == False and job.user_hold:
                 dbwriter.log_to_db(user_name, "user_hold_release", "job_prog", JobProgMsg(job))
+            if set_accounting_hold and not job.accounting_hold:
+                dbwriter.log_to_db(user_name, "accounting_hold", "job_prog", JobProgMsg(job))
+            elif set_accounting_hold == False and job.accounting_hold:
+                dbwriter.log_to_db(user_name, "accounting_hold_release", "job_prog", JobProgMsg(job))
 
             #if we are updating the user list, make sure the submitter
             #is always on the list.
             elif 'user_list' in updates.keys():
                 if job.user not in updates['user_list']:
                     updates['user_list'].insert(0, job.user)
-
-
 
             #if update "user_hold" alone, do not check MaxQueued restriction
             #and "admin_holds" can get the same treatment.
@@ -3897,7 +3935,6 @@ class QueueManager(Component):
             elif updates.keys() == ['accounting_hold']:
                 job.update(updates)
                 only_hold = True
-
             elif self.Queues[test["queue"]].can_queue(test):
                 job.update(updates)
                 if updates.has_key("all_dependencies"):
@@ -3907,7 +3944,6 @@ class QueueManager(Component):
                         message = "[]"
                     logger.info("Job %s/%s: dependencies set to %s", job.jobid, job.user, message)
                 self.check_dep_fail()
-
                 # only do this if the new queue can accept this job
                 if new_q_name:
                     new_q = self.Queues[new_q_name]
@@ -3916,6 +3952,13 @@ class QueueManager(Component):
                     new_q.update_max_running()
                 if not only_hold:
                     dbwriter.log_to_db(user_name, "modifying", "job_data", JobDataMsg(job))
+        try:
+            warn_jobs = self._check_job_accounting([job.jobid for job in joblist], force)
+        except InvalidResponse as exc:
+            self.logger.error("An error occurred with the accounting system.", exc_info=True)
+            self.logger.error("Triggering error was: %s", exc.triggering_exc)
+            self.logger.error("Jobs %s were modified, but accounting verification failed.", joblist)
+        #check to see if anything needs to be put into an accounting hold
         #return only the jobs modified.
         return joblist
     set_jobs = exposed(query(set_jobs))
@@ -3960,7 +4003,7 @@ class QueueManager(Component):
                 raise
             if not res_success:
                 raise ResourceReservationFailure("%s/%s: Unable to reserve "\
-                    "resource at runtime. Does another job have the resrouce?"\
+                    "resource at runtime. Does another job have the resource?"\
                     % (job.jobid, job.user))
 
             if resid != None:
@@ -4064,53 +4107,163 @@ class QueueManager(Component):
         return self.cqp.q_get(data)
     get_history = exposed(get_history)
 
-    def _verify_job_spec(self, spec, advisory=False):
-        '''Given a job spec (from qsub, qalter or cqadm, typically.
-        return a tuple of success or failure of verification and a string indicating the reason why.
+    def _check_job_accounting(self, jobs, force=False, timestamp=None):
+        '''Given a list of job specifications, return a status from an
+        accounting system indicating whether the job should be allowed to run,
+        should be held, or should be deleted.
+
+        Input:
+            job       - List of job objects
+            force     - (default: False) if true, force the job statuses to OK
+            timestamp - (default: None) if this isn't None, it must be a time in
+                        seconds from epoch. This should be an integer.
+
+        Output:
+        A list of dictionaries for jobs that were changed by the accounting
+        response with the following values:
+            jobid  - An integer jobid
+            status - A string that is one of "OK", "HOLD", "REMOVE", "UNKNOWN"
+            reason - A string indicating the action taken and reason for action.
+                     This string should be appropriate for user display.
+
+        Side Effects:
+            Will alter hold status of jobs.  If a REMOVE status is returned, the job
+        Exceptions:
+        TypeError       - job must be a list
+        InvalidResponse - the response returned from the accounting system is
+                          invalid and must not be trusted.
+                          REALTIME_INTERFACE_ERRORS_FATAL must also be set to
+                          True via the config file to get this behavior
 
         '''
-        failed = False
-        failure_msg = "Candidate job accounting validation successful."
-        if 'jobid' in spec.keys():
-            failure_msg = "Job %s accounting validation successful." % spec['jobid']
+        #TODO: Add tests to cqm automated tests for this function.
+        changed_jobs = []
         #keep the job attribute space clean and don't accidentally add extra keys
-        old_resource = None
-        old_timestamp = None
-        if 'resource' in spec.keys():
-            old_resource = spec['resource']
-        if 'timestamp' in spec.keys():
-            old_timestamp = spec['timestamp']
-        spec['resource'] = RESOURCE_NAME
-        spec['timestamp'] = int(time.time())
+        if not isinstance(jobs, list):
+            raise TypeError("spec must be a list or subclass of list.")
+        send_jobs = [] #copy.deepcopy(jobs)
+        for job in jobs:
+            job_dict = {'jobid': int(job),
+                        'type': 'job',
+                        'service': SERVICE_NAME,
+                        'resource': RESOURCE_NAME,
+                        'timestamp': int(time.time()) if timestamp is None else int(timestamp)
+                        }
+            send_jobs.append(job_dict)
         try:
-            verification_response = RealTimeAccounting.verify_job([spec])
-        except RealTimeAccounting.BadMessage:
+            failed = False
+            check_response = RealTimeAccounting.fetch_job_status(send_jobs)
+        except RealTimeAccounting.BadMessage as exc:
             failed = True
-            failure_msg = "RTA Bad Message recieved by Cobalt accounting interface.  Please contact your system administrator."
-            raise
-        except RealTimeAccounting.ConnectionFailure:
+            self.logger.error("BadMessage error from realtime accounting interface: %s", str(exc))
+            failure_msg = "RTA Bad Message received by Cobalt accounting interface.\nPlease contact your system administrator."
+            triggering_exc = exc
+        except RealTimeAccounting.ConnectionFailure as exc:
             failed = True
-            failure_msg = "RTA Connection Failure recieved by Cobalt accounting interface.  "\
+            self.logger.error("ConnectionFailure error from realtime accounting interface: %s", str(exc))
+            failure_msg = "RTA Connection Failure received by Cobalt accounting interface.\n"\
                     "Please contact your system administrator."
-            raise
+            triggering_exc = exc
         else:
-            #only sending one job, must get only one response.
-            if verification_response[0]['status'] != 'ACCEPT':
-                failure_msg = "Job failed to validate.  Reason: %s" % (verification_response[0]['reason'])
-                self.logger.info(failure_msg)
-                if not advisory:
-                    failed = True
+            #fetch job objects for potential modification:
+            for response in check_response:
+                if self._validate_cja_response(response):
+                    changed = self._handle_cja_response(response, force)
+                    if changed:
+                        changed_jobs.append(response)
         finally:
-            #clean up our modifications to the job spec
-            if old_resource is not None:
-                spec['resource'] = old_resource
+            if failed and REALTIME_INTERFACE_ERRORS_FATAL:
+                #Raise an InvalidResponse error.  An exception is also an "InvalidResponse"
+                #we have already logged the error we got.  Let the caller figure this out.
+                #we'll send the triggering exception back as well.
+                raise InvalidResponse(failure_msg, triggering_exc=triggering_exc)
+        return changed_jobs
+
+    def _validate_cja_response(self, response):
+        '''verify that the response received from the realtime interface is actually usable.
+
+        Input: response object
+        Output: True if object passes verification of structure, otherwise False
+        Exceptions: may raise an InvalidResponse with no triggering_exc.
+
+        Side Effects: If REALTIME_INTERFACE_BAD_RESPONSE_FALLBACK is set, a failure of this code
+                      will result in switching to the stub interface.
+
+        Note: This only verifies the structure, it does not check the content.
+
+        '''
+        is_correct = True
+        mandatory_fields = ['jobid', 'status', 'reason']
+        for field in mandatory_fields:
+            if not field in response:
+                is_correct = False
+                err_str = "Response missing mandatory field %s.  Response was: %s" % (field, str(response))
+                if REALTIME_INTERFACE_BAD_RESPONSE_IGNORE:
+                    pass #we're going to ignore this error, just set that the structure didn't pass
+                elif REALTIME_INTERFACE_BAD_RESPONSE_FALLBACK:
+                    #Fallback to do nothing interface.  Raise InvalidResponse so that the caller
+                    #treats returned values as invalid.
+                    self.logger.critical("Falling back to default RTA interface. Reason: %s", err_str)
+                    _revert_to_fallback_rta_interface()
+                    raise InvalidResponse(err_str)
+                elif REALTIME_INTERFACE_BAD_RESPONSE_CONTINUE: #raise value exception. Don't unload.  Response suspect.
+                    self.logger.critical("HOW WE GET HREE?")
+                    self.logger.error("Invalid values from RTA interface.  Reason: %s", err_str)
+                    raise InvalidResponse(err_str)
+                else:
+                    #how did we get here? This shouldn't be possible to the top-level config check.
+                    raise RuntimeError("_validate_cja_response: Bad response, but no response handler specified")
+        return is_correct
+
+    def _handle_cja_response(self, response, force):
+        '''Take actions on a job based on a real-time-accounting fetch_job_statuses response.
+
+        Input:
+            response - list of job response lists from the RTA interface
+            force - if True, treats all jobs as being status OK
+
+        Output:
+            changed - True if the state of the job changed.  False otherwise.
+
+        Side effects:
+            This alters underlying job state according to response sent back.
+
+        '''
+        changed = False
+        try:
+            current_job = self.Queues.get_jobs([{'jobid':response['jobid']}])[0]
+        except IndexError:
+            #we didn't return a job. Ignore at this point and continue
+            self.logger.warning("Jobid %s found in response, but not cqm list of jobs.  Skipping this job.",
+                    response['jobid'])
+        try:
+            if force == True or response['status'] == accounting_const.OK:
+                if current_job.accounting_hold:
+                    self.logger.info('Job %s released from accounting hold.  Reason: %s',
+                            response['jobid'], response['reason'])
+                    current_job.accounting_hold = False
+                    changed = True
+            elif response['status'] == accounting_const.HOLD:
+                if not current_job.accounting_hold:
+                    self.logger.info('Job %s placed into accounting hold.  Reason: %s',
+                            response['jobid'], response['reason'])
+                    current_job.accounting_hold = True
+                    changed = True
+            elif response['status'] == accounting_const.REMOVE:
+                self.Queues.del_jobs([{'jobid': current_job.jobid}])
+                self.logger.warning('Job %s removed by accounting system action.', response['jobid'])
+                changed = True
+            elif response['status'] == accounting_const.UNKNOWN:
+                self.logger.warning('Job %s not found in accounting system.', response['jobid'])
             else:
-                del spec['resource']
-            if old_timestamp is not None:
-                spec['timestamp'] = old_timestamp
-            else:
-                del spec['timestamp']
-        return failed, failure_msg
+                raise ValueError("_handle_cja_response: update_%s is an invalid value for job status")
+        except (KeyError, ValueError) as exc:
+            #Somehow we got a status for a job, that wasn't defined in the API.  Force the RTA module to the Do-nothing
+            #stub and carry on.
+            self.logger.critical("Exception from RTAccounting result: %s", str(exc), exc_info=True)
+            self.logger.critical("Received an out-of-spec status for job. Reverting to stub realtime-interface.")
+            _revert_to_fallback_rta_interface()
+        return changed
 
     def define_user_utility_functions(self, user_name=None):
         if user_name:
@@ -4203,49 +4356,14 @@ class QueueManager(Component):
         current_time = time.time()
         #validate that the job should still be queued
         #in the event of a fault, assume that the job should remain queued
-        #TODO: make the above a setable parameter.
+        #This must operate on all jobs, not just runnable.
         all_jobs = self.Queues.get_jobs([{'jobid':'*'}])
-        all_job_data = []
-        for job in all_jobs:
-            job_dict = {'jobid': job.jobid,
-                        'type': 'job',
-                        'service': SERVICE_NAME,
-                        'resource': RESOURCE_NAME,
-                        }
-            all_job_data.append(job_dict)
-        verified_jobs = []
         try:
-            verified_jobs = RealTimeAccounting.fetch_job_status(all_job_data)
-        except RealTimeAccounting.ConnectionFailure:
-            #fall back to letting all jobs run.  We should let this try again later
-            #TODO: make this a config parameter.
-            self.logger.error("ERROR: Failed to connect to realtime accounting system.  Removing accounting holds on jobs.")
-            verified_jobs = [{'jobid': int(item['jobid']), 'status':'OK', 'reason':'ConnectionFailure'}
-                    for item in all_jobs]
-        except RealTimeAccounting.BadMessage:
-            # do not try to retransmit message.  Let all jobs come back as OK to run.
-            #TODO: make this a config parameter to hold jobs on error.
-            self.logger.error("ERROR: Bad message sent to fetch_job_status.  Removing accounting holds on jobs")
-            self.logger.debug("Attempted to send bad values via fetch_job_status.  Values were: %s", all_jobs)
-            verified_jobs = [{'jobid': int(item['jobid']), 'status':'OK', 'reason':'ConnectionFailure'}
-                    for item in all_jobs]
-        finally:
-            all_jobs = dict(zip([job.jobid for job in all_jobs], all_jobs))
-
-        for job in verified_jobs:
-            if job['status'] == 'OK':
-                if all_jobs[job['jobid']].accounting_hold:
-                    self.logger.info('Job %s released from accounting hold.  Reason: %s', job['jobid'], job['reason'])
-                    all_jobs[job['jobid']].accounting_hold = False
-            elif job['status'] == 'HOLD':
-                if not all_jobs[job['jobid']].accounting_hold:
-                    self.logger.info('Job %s placed into accounting hold.  Reason: %s', job['jobid'], job['reason'])
-                    all_jobs[job['jobid']].accounting_hold = True
-            elif job['status'] == 'REMOVE':
-                self.Queues.del_jobs([{'jobid':job['jobid']}])
-                self.logger.warning('Job %s removed by accounting system action.', job['jobid'])
-            elif job['status'] == 'UNKNOWN':
-                self.logger.warning('Job %s not found in accounting system.', job['jobid'])
+            self._check_job_accounting([int(job.jobid) for job in all_jobs])
+        except InvalidResponse as exc:
+            self.logger.error("An error occurred with the accounting system.", exc_info=True)
+            self.logger.error("Triggering error was: %s", exc.triggering_exc)
+            self.logger.error("Continuing score update")
 
         #Compute the score using the queue's related utility function
         queued_jobs = self.Queues.get_jobs([{'is_runnable':True}])

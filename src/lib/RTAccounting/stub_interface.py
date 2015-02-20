@@ -33,27 +33,6 @@ def fetch_job_status(job_data):
 
     return ret_list
 
-def verify_job(job_data):
-    '''returns all jobs accepted.  Can take multiple jobs in a single call.'''
-    ret_list = []
-    for job in job_data:
-        if 'jobid' in job.keys():
-            if job['jobid'] in [254, 256, 257]:
-                ret_list.append({'jobid': job['jobid'],
-                                 'status': "REJECT",
-                                 'reason': STOCK_REASON,
-                            })
-            else:
-                ret_list.append({'jobid': job['jobid'],
-                                 'status': "ACCEPT",
-                                 'reason': STOCK_REASON,
-                                })
-        else:
-            ret_list.append({'jobid': None,
-                             'status': "ACCEPT",
-                             'reason': STOCK_REASON,
-                            })
-    return ret_list
 
 def update_job(job_data, timestamp=None):
     '''do nothing stub interface for job_updates'''

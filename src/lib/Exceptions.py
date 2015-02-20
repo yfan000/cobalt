@@ -146,3 +146,17 @@ class RequiredLocationError(LookupError):
     '''
     log = True
     fault_code = fault_code_counter.next()
+
+class InvalidResponse(RuntimeError):
+    '''A response from the realtime accounting interface returned invalid values.
+
+    '''
+    log = True
+    fault_code = fault_code_counter.next()
+
+    def __init__(self, message, **kwargs):
+        super(InvalidResponse, self).__init__(message)
+        self.triggering_exc = None
+        if 'triggering_exc' in kwargs:
+            self.triggering_exc = kwargs['triggering_exc']
+
