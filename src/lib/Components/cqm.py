@@ -3839,11 +3839,15 @@ class QueueManager(Component):
         except InvalidResponse as exc:
             self.logger.error("An error occurred with the accounting system.", exc_info=True)
             self.logger.error("Triggering error was: %s", exc.triggering_exc)
-            self.logger.error("Jobs %s were added, but accounting verification failed.", response)
+            self.logger.error("Jobs %s were added, but accounting verification failed.", str(response))
+            for job in response:
+                job.message = "Job added, but accounting verification failed."
         else:
-            added_jobs = response
-        self.logger.debug('added_jobs: %s', added_jobs)
-        return added_jobs
+            for w_job in warn_jobs:
+                for a_job in response:
+                    if int(a_job.jobid) == int(w_job['jobid']):
+                        a_job.message = "%s: %s" % (w_job['status'], w_job['reason'])
+        return response
 
     add_jobs = exposed(query(add_jobs))
 

@@ -281,14 +281,17 @@ def update_spec(parser, opts, spec, opt2spec):
         spec['args']    = opts['args']
 
 
-def logjob(jobid, spec, logToConsole):
+def logjob(jobid, spec, logToConsole, msg=None):
     """
     log job info
     """
     # log jobid to stdout
     if jobid:
         if logToConsole:
-            client_utils.logger.info(jobid)
+            if msg is None:
+                client_utils.logger.info(jobid)
+            else:
+                client_utils.logger.info("%s %s", jobid, msg)
         if spec.has_key('cobalt_log_file'):
             filename = spec['cobalt_log_file']
             t = string.Template(filename)
@@ -298,10 +301,11 @@ def logjob(jobid, spec, logToConsole):
 
         try:
             cobalt_log_file = open(filename, "a")
-            
             print >> cobalt_log_file, "Jobid: %s" % jobid
             print >> cobalt_log_file, "qsub %s" % (" ".join(sys.argv[1:]))
             print >> cobalt_log_file, "%s submitted with cwd set to: %s" % ( client_utils.sec_to_str(time.time()), spec['cwd'])
+            if msg is not None:
+                print >> cobalt_log_file, "Special Message for jobid %s: %s" % (jobid, msg)
             cobalt_log_file.close()
         except Exception, e:
             client_utils.logger.error("WARNING: failed to create cobalt log file at: %s: %s", filename, e)
@@ -421,6 +425,9 @@ def run_job(parser, user, spec, opts):
         not_exit_on_interrupt()
         jobs  =  client_utils.component_call(QUEMGR, False, 'add_jobs',([spec],), False)
         jobid = jobs[0]['jobid']
+        msg = None
+        if 'message' in jobs[0]:
+            msg = jobs[0]['message']
         exit_on_interrupt()
 
         if parser.options.envs:
@@ -428,17 +435,17 @@ def run_job(parser, user, spec, opts):
 
         # If this is an interactive job, wait for it to start, then start user shell
         if parser.options.mode == 'interactive':
-            logjob(jobid, spec, False)
+            logjob(jobid, spec, False, msg)
             deljob = run_interactive_job(jobid, user,  opts['disable_preboot'], opts['nodecount'], opts['proccount'])
         else:
-            logjob(jobid, spec, True)
+            logjob(jobid, spec, True, msg)
     except Exception, e:
         client_utils.logger.error(e)
         exc_occurred = True
     finally:
         if parser.options.mode == 'interactive':
             exit_interactive_job(deljob, jobid, user)
-        if exc_occurred: 
+        if exc_occurred:
             sys.exit(1)
 
 def main():
@@ -491,6 +498,7 @@ def main():
     def_spec['user_list']      = [user]
     def_spec['procs']          = False
     def_spec['script_preboot'] = True
+    def_spec['message']        = None
 
     parser    = ArgParse(opt_def, callbacks)
     opt_count = parse_options(parser, spec, opts, opt2spec, def_spec)
