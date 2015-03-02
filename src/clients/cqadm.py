@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Administrative interface for queue manager. Allowsone to hold, run, kill, and set 
+Administrative interface for queue manager. Allowsone to hold, run, kill, and set
 the queue for jobs in the queue manager. Can also add/del queues and set queue properties.
 
 Usage: %prog --help
@@ -68,7 +68,7 @@ from Cobalt.client_utils import \
     cb_debug, cb_time, cb_path, cb_gtzero, cb_setqueues, cb_hold
 from Cobalt.arg_parser import ArgParse
 
-    
+
 __revision__ = '$Revision: 559 $'
 __version__  = '$Version$'
 
@@ -178,7 +178,7 @@ def getq(info):
 
 def setjobs(jobs, parser, spec, user):
     """
-    set jobs 
+    set jobs
     """
     if hasattr(parser.options,'admin_hold'):
         for job in jobs:
@@ -201,7 +201,7 @@ def process_cqadm_options(jobs, parser, spec, user):
     This function will process any command argument and options passed to cqadm
     """
 
-    force = parser.options.force # force flag. 
+    force = parser.options.force # force flag.
 
     info = [{'tag':'queue', 'name':'*', 'state':'*', 'users':'*', 'maxtime':'*', 'mintime':'*', 'maxuserjobs':'*',
              'maxusernodes':'*', 'maxqueued':'*', 'maxrunning':'*', 'maxnodehours':'*', 'adminemail':'*', 
@@ -242,6 +242,9 @@ def process_cqadm_options(jobs, parser, spec, user):
         client_utils.logger.error("Failed to match any jobs or queues")
     else:
         client_utils.logger.debug(response)
+        for resp in response:
+            if 'message' in resp and resp['message'] is not None:
+                client_utils.logger.info("%s: %s", resp['jobid'] ,resp['message'])
 
 def main():
     """

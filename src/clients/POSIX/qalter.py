@@ -148,7 +148,7 @@ def update_time(orig_job, new_spec, parser):
     sub_dt = False
 
     if hasattr(parser.parser,'__timeop__'):
-        if parser.parser.__timeop__ == '+': 
+        if parser.parser.__timeop__ == '+':
             add_dt = True
         elif parser.parser.__timeop__ == '-':
             sub_dt = True
@@ -171,7 +171,7 @@ def update_procs(spec, parser):
     Will update 'proc' according to what system we are running on given the number of nodes
     """
     sysinfo = client_utils.system_info()
-    if ((parser.options.nodes is not None or parser.options.mode is not None) and 
+    if ((parser.options.nodes is not None or parser.options.mode is not None) and
             parser.options.procs is None):
         if sysinfo[0] == 'bgq':
             if spec['mode'] == 'script':
@@ -192,8 +192,8 @@ def update_procs(spec, parser):
                     sys.exit(1)
             else:
                 spec['procs'] = spec['nodes']
-    
-def do_some_logging(job, orig_job, parser):
+
+def do_some_logging(job, orig_job, parser, response):
     """
     do some logging
     """
@@ -207,6 +207,9 @@ def do_some_logging(job, orig_job, parser):
                 client_utils.logger.info("%s set to %s" % (key, job[key]))
         elif job[key] != orig_job[key]:
             client_utils.logger.info("%s changed from %s to %s" % (key, orig_job[key], job[key]))
+    for resp in response:
+        if 'message' in resp and resp['message'] is not None:
+            client_utils.logger.info("%s: %s", resp['jobid'] ,resp['message'])
 
 def main():
     """
@@ -282,7 +285,7 @@ def main():
 
         client_utils.process_filters(filters, job)
         response = client_utils.component_call(QUEMGR, False, 'set_jobs', ([orig_job], job, user))
-        do_some_logging(job, orig_job, parser)
+        do_some_logging(job, orig_job, parser, response)
 
     if not response:
         client_utils.logger.error("Failed to match any jobs or queues")

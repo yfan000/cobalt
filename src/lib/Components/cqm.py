@@ -572,7 +572,7 @@ class Job (StateMachine):
         "ion_kerneloptions", "admin_hold", "accounting_hold" "user_hold", "dependencies", "notify", "adminemail", "outputpath",
         "errorpath", "cobalt_log_file", "path", "preemptable", "preempts", "mintasktime", "maxtasktime", "maxcptime",
         "force_kill_delay", "is_runnable", "is_active", "has_completed", "sm_state", "score", "attrs", "has_resources",
-        "exit_status", "dep_frac", "walltime_p", "user_list", "runid", "geometry"
+        "exit_status", "dep_frac", "walltime_p", "user_list", "runid", "geometry", "message"
     ]
 
     _states = get_job_sm_states() + StateMachine._states
@@ -3834,6 +3834,14 @@ class QueueManager(Component):
             raise QueueError(failure_msg)
 
         response = self.Queues.add_jobs(specs, self.__add_job_terminal_action)
+
+        return self._append_accounting_responses(response)
+
+    add_jobs = exposed(query(add_jobs))
+
+    def _append_accounting_responses(self, response):
+        '''Take a response and append messages as appropriate to jobs, (being held, removed, etc).'''
+        warn_jobs = []
         try:
             warn_jobs = self._check_job_accounting([job.jobid for job in response])
         except InvalidResponse as exc:
@@ -3849,7 +3857,6 @@ class QueueManager(Component):
                         a_job.message = "%s: %s" % (w_job['status'], w_job['reason'])
         return response
 
-    add_jobs = exposed(query(add_jobs))
 
     def get_jobs(self, specs):
         return self.Queues.get_jobs(specs)
@@ -3884,8 +3891,6 @@ class QueueManager(Component):
                          the changes have been rejected.
 
         '''
-        modified_jobs = []
-        warn_jobs = []
         joblist = self.Queues.get_jobs(specs)
         logger.info("%s calling set_jobs on %s with updates %s", user_name, specs, updates)
         new_q_name = None
@@ -3956,14 +3961,15 @@ class QueueManager(Component):
                     new_q.update_max_running()
                 if not only_hold:
                     dbwriter.log_to_db(user_name, "modifying", "job_data", JobDataMsg(job))
-        try:
-            warn_jobs = self._check_job_accounting([job.jobid for job in joblist], force)
-        except InvalidResponse as exc:
-            self.logger.error("An error occurred with the accounting system.", exc_info=True)
-            self.logger.error("Triggering error was: %s", exc.triggering_exc)
-            self.logger.error("Jobs %s were modified, but accounting verification failed.", joblist)
+
         #check to see if anything needs to be put into an accounting hold
         #return only the jobs modified.
+        #append message to the speclist so we return it from the query inteface.
+        for spec in specs:
+            spec['message'] = '*'
+        for job in joblist:
+            job.messge = None
+        joblist = self._append_accounting_responses(joblist)
         return joblist
     set_jobs = exposed(query(set_jobs))
 

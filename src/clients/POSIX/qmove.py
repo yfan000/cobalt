@@ -35,7 +35,7 @@ def validate_args(parser,user):
 
     jobs = [{'tag':'job', 'user':user, 'jobid':jobid, 'project':'*', 'notify':'*',
              'walltime':'*', 'queue':'*', 'procs':'*', 'nodes':'*'} for jobid in jobids]
-    queue = parser.args[0] 
+    queue = parser.args[0]
     return queue,jobs
 
 def main():
@@ -67,6 +67,7 @@ def main():
     jobdata    = client_utils.component_call(QUEMGR, False, 'get_jobs', (jobs,))
 
     response = []
+    hold_msg = []
     # move jobs to queue
     for job in jobdata:
         orig_job = job.copy()
@@ -74,12 +75,17 @@ def main():
         client_utils.process_filters(filters,job)
         [j] = client_utils.component_call(QUEMGR, False, 'set_jobs', ([orig_job],job,user))
         response.append("moved job %d to queue '%s'" % (j.get('jobid'), j.get('queue')))
+        for resp in [j]:
+            if 'message' in resp and resp['message'] is not None:
+                hold_msg.append("%s: %s"% (resp['jobid'] ,resp['message']))
 
     if not response:
         client_utils.logger.error("Failed to match any jobs or queues")
     else:
         for line in response:
             client_utils.logger.info(line)
+        for msg in hold_msg:
+            client_utils.logger.info(msg)
 
 if __name__ == '__main__':
     try:
