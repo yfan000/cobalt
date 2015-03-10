@@ -3809,8 +3809,6 @@ class QueueManager(Component):
 
         maxtime = get_cqm_config('max_walltime', None)
         failed = False
-        added_jobs = []
-        warn_jobs = []
         for spec in specs:
             if spec['queue'] in self.Queues:
                 if 'walltime' in spec:
