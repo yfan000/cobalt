@@ -25,6 +25,21 @@ from functools import wraps
 
 
 RESOURCE_NAME = get_config_option('system', 'resource_name', 'default')
+RECORD_MAPPING = {'abort': 'A',
+                  'begin': 'B',
+                  'checkpoint': 'C',
+                  'checkpoint_restart': 'T',
+                  'delete': 'D',
+                  'end': 'E',
+                  'finish': 'F',
+                  'system_remove': 'K',
+                  'remove': 'k',
+                  'queue': 'Q',
+                  'rerun': 'R',
+                  'start': 'S',
+                  'unconfirmed': 'U',
+                  'confirmed': 'Y', #It's what the spec says.
+        }
 
 #decorators for job/res information intercepts.
 def _gen_arg_dict(func, *args, **kwargs):
@@ -34,6 +49,7 @@ def _gen_arg_dict(func, *args, **kwargs):
         update_dict[key] = val
     #make sure all messages are tagged with appropriate resource
     update_dict['resource'] = RESOURCE_NAME
+    update_dict['record'] = RECORD_MAPPING[func.__name__]
     return update_dict
 
 def job_record(func):
