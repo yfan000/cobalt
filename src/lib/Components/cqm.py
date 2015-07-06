@@ -3903,26 +3903,43 @@ class QueueManager(Component):
                 if walltime <= 0:
                     if 'maxtime' in self.Queues[job.queue].restrictions:
                         maxtime = self.Queues[job.queue].restrictions['maxtime'].value
-                        logger.info('Setting max queue time %s for jobid %s on queue %s' % (str(maxtime), str(job.jobid), job.queue))
+                        logger.info('Setting max queue time %s for jobid %s on queue %s',
+                                str(maxtime), str(job.jobid), job.queue)
                     else:
                         maxtime = get_cqm_config('max_walltime', None)
                         if not maxtime:
                             failure_msg = "No Queue Max Walltime Defined for queue: %s" % job.queue
                             logger.error(failure_msg)
-                            raise QueueError, failure_msg
+                            raise QueueError(failure_msg)
                     job.walltime = maxtime
                 else:
-                    logger.info('Setting remaining reservation time %s for jobid %s on queue %s' % (str(walltime), str(job.jobid), job.queue))
-                    job.walltime = walltime
+                    if job.walltime <= 0:
+                        #This is a run until the reservation runs out job.
+                        logger.info('Setting remaining reservation time %s for jobid %s on queue %s',
+                                str(walltime), str(job.jobid), job.queue)
+                        job.walltime = walltime
+                    elif job.walltime != walltime:
+                        err_msg = '%s/%s: Walltime changed between start and end of scheduler loop.  Startup aborted' % \
+                                (job.jobid, job.user)
+                        logger.warning(err_msg)
+                        try:
+                            res_success = ComponentProxy("system").reserve_resources_until(
+                                nodelist, None, job.jobid)
+                        except xmlrpclib.Fault:
+                            raise
+                        if not res_success:
+                            raise ResourceReservationFailure("%s.%s: Unable to release resource reservation." %\
+                                (job.jobid, job.user))
+                        return #Make no further attempt to start this job at this time. Next pass will get it.
             try:
                 res_success = ComponentProxy("system").reserve_resources_until(
                     nodelist, time.time() + ((float(job.walltime) + float(job.force_kill_delay) + 1.0) * 60.0),
                     job.jobid)
-            except xmlrpclib.Fault, flt:
+            except xmlrpclib.Fault:
                 raise
             if not res_success:
                 raise ResourceReservationFailure("%s/%s: Unable to reserve "\
-                    "resource at runtime. Does another job have the resrouce?"\
+                    "resource at runtime. Does another job have the resource?"\
                     % (job.jobid, job.user))
 
             if resid != None:
