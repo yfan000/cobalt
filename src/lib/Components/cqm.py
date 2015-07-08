@@ -3897,15 +3897,19 @@ class QueueManager(Component):
             logger.info("%s using cqadm to start %s on %s", user_name, specs, nodelist)
 
         def _run_jobs(job, nodes):
+            #walltime = wallclock time that the scheduler used for considering the job
+            #job.walltime = wallclock time set in the job object in CQM.
             # set new walltime if available
             maxtime = None
             if walltime is not None:
                 if walltime <= 0:
+                    #time was set to -t 0 in qsub and submitted to a non-reservation queue.
                     if 'maxtime' in self.Queues[job.queue].restrictions:
                         maxtime = self.Queues[job.queue].restrictions['maxtime'].value
                         logger.info('Setting max queue time %s for jobid %s on queue %s',
                                 str(maxtime), str(job.jobid), job.queue)
                     else:
+                        #no maxtime was defined on the queue.  Check the config file.
                         maxtime = get_cqm_config('max_walltime', None)
                         if not maxtime:
                             failure_msg = "No Queue Max Walltime Defined for queue: %s" % job.queue
@@ -3913,12 +3917,21 @@ class QueueManager(Component):
                             raise QueueError(failure_msg)
                     job.walltime = maxtime
                 else:
-                    if job.walltime <= 0:
+                    if job.walltime <= 0: #should we check to see if resid is set here? --PMR
                         #This is a run until the reservation runs out job.
+                        #walltime here is the time remaining in the reservation
+                        #that the job belongs to.  The scheduler knows
+                        #reservations and their remaining times.
                         logger.info('Setting remaining reservation time %s for jobid %s on queue %s',
                                 str(walltime), str(job.jobid), job.queue)
                         job.walltime = walltime
                     elif job.walltime != walltime:
+                        #The scheduler's view of the walltime and cqm's don't
+                        #match, usually because a user has modified their job
+                        #while the scheduling loop was running.  At this point
+                        #do not start the job, release resource reservations
+                        #and allow the job to be picked up in the next scheduler
+                        #pass.
                         err_msg = '%s/%s: Walltime changed between start and end of scheduler loop.  Startup aborted' % \
                                 (job.jobid, job.user)
                         logger.warning(err_msg)
