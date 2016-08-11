@@ -13,8 +13,10 @@ transfers fail, and optionally stage result out upon job completion.
 For developers, data staging feature requires Globus SDK for Python
 support. Please refer to http://globus.github.io/globus-sdk-python/
 
-For users, the arguments for data staging should be specified when users
-submit jobs. One example is
+For users, make sure the involved endpoints are in "ready" or "in use"
+state before job submission. Endpoints' status can be found at
+https://www.globus.org/app/endpoints. The arguments for data staging
+should be specified when users submit jobs. One example is
 
 qsub -t 5 -n 512 --attrs stage_config_file=/path/to/config_file <executable>
 
