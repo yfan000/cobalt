@@ -10,8 +10,12 @@ and/or staging out and then Cobalt could transfer data before a job
 starts, monitor transfer progress, notify users to alter arguments if
 transfers fail, and optionally stage result out upon job completion.
 
-For developers, data staging feature requires Globus SDK for Python
-support. Please refer to http://globus.github.io/globus-sdk-python/
+For system administers, data staging feature requires Globus SDK for Python.
+Please refer to http://globus.github.io/globus-sdk-python/. Also, administers
+can switch off data staging feature by editing "stage" section in cobalt.conf
+file. Setting "allow_dat_staging" to false disable data staging feature, while
+setting it to true enable this feature. If the system turns off data staging
+feature, any jobs trying to use this feature will be killed.
 
 For users, make sure the involved endpoints are in "ready" or "in use"
 state before job submission. Endpoints' status can be found at
