@@ -765,6 +765,10 @@ class Job (StateMachine):
 	    logger.warning("Job %s/%s: Transfer failed. Read transfer configuration file failed."
                       " Please alter your transfer parameter using 'qalter' command. %s",
                       self.jobid,self.user,e)
+            if self.notify:
+                subj = 'Cobalt: Job %s/%s Data Staging fails. - %s' % (self.jobid, self.user, stats)
+                mmsg = ("Job %s/%s, data staging fails. Using qalter command change data staging configuration file" % (self.jobid, self.user))
+                self.state_email(subj,mmsg)
 
     def stageout_read_config(self):
         try:
@@ -786,6 +790,19 @@ class Job (StateMachine):
         except Exception as e:
 	    logger.warning("Job %s/%s: Transfer failed. Read transfer configuration fail."
                       " Please transfer results manually. %s",self.jobid,self.user,self.trans_task_id,e)
+
+    def state_email(self,subj,mmsg):
+        mailserver = get_cqm_config('mailserver', None)
+        if mailserver == None:
+	    mserver = 'localhost'
+        else:
+	    mserver = mailserver
+        toaddr = []
+        if self.adminemail:
+	    toaddr = toaddr + self.adminemail.split(':')
+        if self.notify:
+	    toaddr = toaddr + self.notify.split(':')
+        thread.start_new_thread(Cobalt.Util.sendemail, (toaddr, subj, mmsg), {'smtpserver':mserver})
 
     def no_holds_left(self):
         '''Check for whether any holds are set on a job'''
@@ -1389,12 +1406,21 @@ class Job (StateMachine):
                         logger.warning("Job %s/%s: Transfer failed. Stagein_type must be 'file' or 'dir'."
                                   " Please alter your transfer parameter using 'qalter' command.",
                                    self.jobid,self.user)
+                        if self.notify:
+                            subj = 'Cobalt: Job %s/%s Data Staging fails. - %s' % (self.jobid, self.user, stats)
+                            mmsg = ("Job %s/%s, data staging fails. Using qalter command change data staging configuration file." % (self.jobid, self.user))
+                            self.state_email(subj,mmsg)
                         return
             else:
                 self.trans_fail = True
                 logger.warning("Job %s/%s: Transfer failed. stagein_src, stagein_des and stagein_type must have same number"
                          " of parameters. Please alter your transfer"
                          " parameter using 'qalter' command.",self.jobid,self.user)
+                if self.notify:
+                    subj = 'Cobalt: Job %s/%s Data Staging fails. - %s' % (self.jobid, self.user, stats)
+                    mmsg = ("Job %s/%s, data staging fails. Using qalter command change data staging configuration file." % (self.jobid, self.user))
+                    self.state_email(subj,mmsg)
+                return
             self.trans_task_id = self.tc.submit_transfer(tdata)["task_id"]
 	    logger.debug("Job %s/%s: DEBUG: transfer from %s to %s initialize.",
                          self.jobid,self.user,self.attrs["stagein_src"],self.attrs["stagein_des"])
@@ -1402,6 +1428,10 @@ class Job (StateMachine):
 	    self.trans_fail = True
 	    logger.warning("Job %s/%s: Transfer %s failed. Please alter your transfer parameter"
                       " using 'qalter' command. %s",self.jobid,self.user,self.trans_task_id,e)
+	    if self.notify:
+                subj = 'Cobalt: Job %s/%s Data Staging fails. - %s' % (self.jobid, self.user, stats)
+                mmsg = ("Job %s/%s, data staging fails. Using qalter command change data staging configuration file." % (self.jobid, self.user))
+                self.state_email(subj,mmsg)
 
     def initialize_stageout(self):
         try:
@@ -1423,17 +1453,15 @@ class Job (StateMachine):
                     elif stageout_type_list[index] == "dir":
                         tdata.add_item(stageout_src_list[index],stageout_des_list[index],recursive=True)
                     else:
-                        self.trans_fail = True
-                        logger.warning("Job %s/%s: Transfer failed. stageout_type must be 'file' or 'dir'."
-                                 " Please alter your transfer parameter using 'qalter' command.",
+                        #self.trans_fail = True
+                        logger.warning("Job %s/%s: Transfer failed. stageout_type must be 'file' or 'dir'.",
                                  self.jobid,self.user)
                         return
             else:
-                self.trans_fail = True
+                #self.trans_fail = True
                 logger.warning("Job %s/%s: Transfer failed. stageout_src, stageout_des and stageout_type"
-                         " must have same number of parameters."
-                         " Please alter your transfer parameter using 'qalter' command.",self.jobid,self.user)
-            self.trans_task_id = self.tc.submit_transfer(tdata)["task_id"]
+                         " must have same number of parameters.",self.jobid,self.user)
+                return
             self.trans_task_id = self.tc.submit_transfer(tdata)["task_id"]
 	    logger.debug("Job %s/%s: DEBUG: transfer from %s to %s initialize.",
                           self.jobid,self.user,self.attrs["stageout_src"],self.attrs["stageout_des"])
@@ -1852,12 +1880,25 @@ class Job (StateMachine):
             transfer_status = str(self.tc.get_task(self.trans_task_id)["status"])
             if transfer_status == 'SUCCEEDED':
                 self.trans_hold = False
+                # notify the user that the data staging has completed; a separate thread is used to send the email so that cqm does not block
+                # waiting for the smtp server to respond
+                if self.notify:
+                    subj = 'Cobalt: Job %s/%s Data Staging finished and starts to queue. - %s' % (self.jobid, self.user, stats)
+                    mmsg = ("Job %s/%s, data staging finishes.\n Transfer task id: %s" % (self.jobid, self.user,self.trans_task_id))
+                    self.state_email(subj,mmsg)
             elif transfer_status == 'FAILED':
                 #self.trigger_event('Kill', {'type' : 'trans'})
                 self.trans_fail = True
                 logger.warning("Job %s/%s: Transfer %s failed. Please alter your "
                           " transfer parameter using 'qalter' command.",
                           self.jobid,self.user,self.trans_task_id)
+                # notify the user that the data staging fails; a separate thread is used to send the email so that cqm does not block
+                # waiting for the smtp server to respond
+                if self.notify:
+                    subj = 'Cobalt: Job %s/%s Data Staging fails. - %s' % (self.jobid, self.user, stats)
+                    mmsg = ("Job %s/%s, data staging fails. Using qalter command change data staging configuration file.\n Transfer task id: %s" % (self.jobid, self.user,self.trans_task_id))
+                    self.state_email(subj,mmsg)
+
 
     def _sm_common__pending_hold(self, args):
         '''place a pending hold to a preemptable job that is active'''

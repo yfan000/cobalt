@@ -24,6 +24,9 @@ should be specified when users submit jobs. One example is
 
 qsub -t 5 -n 512 --attrs stage_config_file=/path/to/config_file <executable>
 
+You can add "--notify" option, so you will receive an email when the data
+staging successes or fails and when the job starts and stops.
+
 The value of the attribute stage_config_file is the path to the data staging
 file. One example of stage_config_file is
 
